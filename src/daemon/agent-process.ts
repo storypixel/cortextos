@@ -8,6 +8,8 @@ import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
 import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
 import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
+import type { MessageConnector } from '../connectors/index.js';
+import { TelegramConnector } from '../connectors/index.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
@@ -93,6 +95,11 @@ export class AgentProcess {
   private lastSpawnMode: 'fresh' | 'continue' | null = null;
   private lastStartAtMs = 0;
   private opencodeContinueWedgeCount = 0;
+  // PR1 of pluggable connectors: holds the agent's MessageConnector handle.
+  // Populated via setConnector() from agent-manager. One-way mirror to legacy
+  // telegramApi/telegramChatId fields when (and only when) the connector is a
+  // TelegramConnector. Non-Telegram connectors leave the legacy fields untouched.
+  private connector: MessageConnector | null = null;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -502,6 +509,40 @@ export class AgentProcess {
     if (this.config.runtime === 'codex-app-server' && this.pty) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(api, chatId);
     }
+  }
+
+  /**
+   * Wire the agent's `MessageConnector` handle (PR1 of pluggable
+   * connectors). Coexists with `setTelegramHandle` for one release cycle
+   * — the daemon calls `setConnector` once at startAgent time; legacy
+   * call sites that still use `setTelegramHandle` continue to work.
+   *
+   * One-way mirror: if `c` is a `TelegramConnector`, the legacy
+   * `telegramApi`/`telegramChatId` fields are populated via
+   * `c.rawTelegramApi()` so CodexAppServerPTY's session-refresh re-wire
+   * (`agent-process.ts:126-128`) continues to find them. For any other
+   * connector kind, the legacy fields are left untouched (a Null- or
+   * future Matrix-connector does not clobber an existing Telegram
+   * handle that was set earlier in the lifecycle).
+   */
+  setConnector(c: MessageConnector): void {
+    this.connector = c;
+    if (c instanceof TelegramConnector) {
+      this.telegramApi = c.rawTelegramApi();
+      this.telegramChatId = c.getChatId();
+      if (this.config.runtime === 'codex-app-server' && this.pty) {
+        (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
+      }
+    }
+  }
+
+  /**
+   * Returns the currently-wired `MessageConnector` (or null). Used by
+   * code paths that need to dispatch via the generic interface rather
+   * than the legacy Telegram fields.
+   */
+  getConnector(): MessageConnector | null {
+    return this.connector;
   }
 
   /**
