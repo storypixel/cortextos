@@ -12,7 +12,7 @@ import { TelegramPoller } from '../telegram/poller.js';
 import { SlackAPI } from '../slack/api.js';
 import { SlackSocketModeClient } from '../slack/socket-mode.js';
 import { dispatchSlackMessage, makeUserNameResolver, type DispatchTarget } from '../slack/dispatcher.js';
-import { TelegramConnector } from '../connectors/index.js';
+import { TelegramConnector, NullConnector } from '../connectors/index.js';
 import type { MessageConnector } from '../connectors/index.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
@@ -579,7 +579,16 @@ export class AgentManager {
     let botToken: string | undefined;
     let connector: MessageConnector | null = null;
 
-    if (existsSync(agentEnvFile)) {
+    // Dispatch on explicit `config.connector` first; fall back to the
+    // inline Telegram gate when absent. Codex M1.cr — without this branch
+    // the override was declared in AgentConfig but silently ignored by
+    // startAgent.
+    if (config.connector === 'none') {
+      // Explicit no-comms agent. Skip the Telegram gate entirely
+      // (including its WARNING/SECURITY log lines — none of them apply when
+      // the operator has opted out of Telegram by config).
+      connector = new NullConnector();
+    } else if (existsSync(agentEnvFile)) {
       // stripBom: Windows tooling writes .env with a UTF-8 BOM that breaks
       // /^BOT_TOKEN=/m when BOT_TOKEN is on line 1 (2026-05-16 silent
       // smith-not-receiving-Telegram incident). See src/utils/strip-bom.ts.
@@ -627,25 +636,22 @@ export class AgentManager {
       }
 
       if (botToken && chatId) {
-        telegramApi = new TelegramAPI(botToken);
-        // PR1 of pluggable connectors: build the TelegramConnector alongside
-        // the legacy telegramApi/chatId/allowedUserId fields. The connector
-        // wraps the SAME TelegramAPI for any code path that wants to dispatch
-        // through the generic interface; the legacy fields stay populated for
-        // code paths PR1 leaves Telegram-direct (FastChecker callback-edit,
-        // activity channel, approval ping, daemon crash alert). PR2 migrates
-        // those to use the connector and removes the legacy fields.
+        // PR1 of pluggable connectors + Codex M2.cr: construct the
+        // TelegramConnector FIRST, then extract its internal TelegramAPI
+        // for the legacy fields. Single shared TelegramAPI instance so
+        // rate-limiting (api.ts:85) and self-chat warning dedup (api.ts:88)
+        // stay in lock-step across the connector path and the legacy-field
+        // path. PR2 migrates the legacy-field call sites and removes them.
         connector = new TelegramConnector(agentDir, {
           BOT_TOKEN: botToken,
           CHAT_ID: chatId,
           ALLOWED_USER: allowedUserId ?? '',
         });
+        telegramApi = (connector as TelegramConnector).rawTelegramApi();
         // Don't log sensitive user IDs — just indicate the gate is enabled
         log(`Telegram configured (chat_id: ****${String(chatId).slice(-4)}, allowed_user: enabled)`);
       }
     }
-    // (else: connector remains null — byte-identical to today's behavior of
-    // leaving telegramApi/chatId/allowedUserId undefined when the gate fails.)
 
     const agentProcess = new AgentProcess(name, env, config, log);
     // Issue #330: pass the Telegram handle into AgentProcess so CodexAppServerPTY
