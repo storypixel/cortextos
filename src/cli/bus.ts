@@ -1385,9 +1385,9 @@ busCommand
     const api = new TelegramAPI(botToken);
     try {
       // Empty string -> clear reaction; otherwise set the supplied emoji.
-      const value = emoji === '' ? null : emoji;
-      await api.setMessageReaction(parseInt(chatId, 10), parseInt(messageId, 10), value);
-      console.log(value ? `Reacted ${value}` : 'Reaction cleared');
+      const emojis = emoji === '' ? [] : [emoji];
+      await api.setMessageReaction(parseInt(chatId, 10), parseInt(messageId, 10), emojis);
+      console.log(emoji === '' ? 'Reaction cleared' : `Reacted ${emoji}`);
     } catch (err: any) {
       console.error(`Failed to set reaction: ${err.message || err}`);
       process.exit(1);
