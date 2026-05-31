@@ -2,13 +2,14 @@ import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } f
 import { join } from 'path';
 import { homedir } from 'os';
 import { randomBytes } from 'crypto';
+import { spawn as spawnChild, type ChildProcessWithoutNullStreams } from 'child_process';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir, atomicWriteSync } from '../utils/atomic.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
-import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
+import { StdioJsonRpcClient, type JsonRpcResponse } from '../utils/stdio-jsonrpc-client.js';
 
 interface IPty {
   pid: number;
@@ -105,7 +106,8 @@ export class CodexAppServerPTY {
   } | null = null;
   private _spawnFn: SpawnFn | null = null;
   private _appServerPty: IPty | null = null;
-  private _rpc: WsUnixJsonRpcClient | null = null;
+  private _childProcess: ChildProcessWithoutNullStreams | null = null;
+  private _rpc: StdioJsonRpcClient | null = null;
   private _onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private _outputBuffer: OutputBuffer;
   private _env: CtxEnv;
@@ -188,17 +190,30 @@ export class CodexAppServerPTY {
       this._rpc.close();
       this._rpc = null;
     }
+    if (this._childProcess) {
+      try {
+        this._childProcess.kill();
+      } catch {
+        // Ignore shutdown errors.
+      }
+      // Do NOT null _childProcess here — let the real 'exit' event fire
+      // _onExitHandler. Setting it null synchronously would mask the real
+      // exit code from the daemon and trigger spurious crash-recovery loops.
+    }
     if (this._appServerPty) {
       try {
         this._appServerPty.kill();
       } catch {
-        // Ignore shutdown errors.
+        // Ignore shutdown errors (legacy PTY path).
       }
       this._appServerPty = null;
     }
     this.removeSocket();
-    this._onExitHandler?.(0, undefined);
-    this._onExitHandler = null;
+    // Do NOT synthetically fire _onExitHandler here. The real exit event
+    // from child.on('exit') (or the legacy pty.onExit) is the authoritative
+    // signal. Synthetic 0-exit calls confused the daemon's handleExit into
+    // treating spawn failures as graceful exits, triggering BUG-011 restart
+    // cascades. Leave _onExitHandler in place so the real exit can call it.
   }
 
   isAlive(): boolean {
@@ -206,7 +221,7 @@ export class CodexAppServerPTY {
   }
 
   getPid(): number | null {
-    return this._appServerPty?.pid ?? null;
+    return this._childProcess?.pid ?? this._appServerPty?.pid ?? null;
   }
 
   onExit(handler: (exitCode: number, signal?: number) => void): void {
@@ -410,40 +425,56 @@ export class CodexAppServerPTY {
 
   private startAppServer(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      if (!this._spawnFn) {
-        const nodePty = require('node-pty');
-        this._spawnFn = nodePty.spawn;
-      }
-
-      const spawnFn = this._spawnFn!;
-      const pty = spawnFn('codex', [
+      // Codex 0.125's stdio:// transport is plain newline-delimited JSON-RPC.
+      // The unix:// transport is NOT WebSocket-framed (a misread in earlier
+      // versions of this file that caused silent handshake failures). Use
+      // child_process.spawn directly — no PTY needed since codex doesn't
+      // require a TTY for app-server mode and PTY framing adds escape codes
+      // that interleave with the JSON-RPC stream.
+      const child = spawnChild('codex', [
         'app-server',
-        '--enable', 'goals',
-        '--listen', this._socketListenArg,
+        '--listen', 'stdio://',
       ], {
-        name: 'xterm-256color',
-        cols: 200,
-        rows: 50,
-        cwd: this._socketCwd,
+        cwd: this._cwd,
         env: this.buildEnv(),
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      this._appServerPty = pty;
-      pty.onData((data) => {
+      this._childProcess = child;
+
+      child.stderr.setEncoding('utf-8');
+      child.stderr.on('data', (data: string) => {
         this._outputBuffer.push(data);
         if (data.includes('Error:')) {
-          reject(new Error(data.trim()));
+          // stderr 'Error:' lines are usually fatal — reject the spawn promise
+          // only if we haven't transitioned to "alive" yet.
+          if (!this._alive) {
+            reject(new Error(data.trim()));
+          }
         }
       });
-      pty.onExit(({ exitCode, signal }) => {
-        if (this._appServerPty !== pty) return;
-        this._appServerPty = null;
+
+      child.on('error', (err) => {
+        if (this._childProcess !== child) return;
+        this._childProcess = null;
         this._alive = false;
-        this.rejectTurnCompletion(new Error('Codex app-server exited'));
-        this._onExitHandler?.(exitCode, signal);
+        this.rejectTurnCompletion(err);
+        this._onExitHandler?.(1, undefined);
+        reject(err);
       });
 
-      this.waitForSocket().then(resolve, reject);
+      child.on('exit', (exitCode, signal) => {
+        if (this._childProcess !== child) return;
+        this._childProcess = null;
+        this._alive = false;
+        this.rejectTurnCompletion(new Error('Codex app-server exited'));
+        this._onExitHandler?.(exitCode ?? 0, signal ? 1 : undefined);
+      });
+
+      // Resolve immediately — the child is spawned. connectRpc() (called next
+      // in spawn()) will detect any real failure via the JSON-RPC initialize
+      // round-trip.
+      resolve();
     });
   }
 
@@ -457,9 +488,12 @@ export class CodexAppServerPTY {
   }
 
   private async connectRpc(): Promise<void> {
-    this._rpc = new WsUnixJsonRpcClient(this._socketPath);
+    if (!this._childProcess) {
+      throw new Error('cannot connect RPC: child process not spawned');
+    }
+    this._rpc = new StdioJsonRpcClient();
     this._rpc.onMessage((message) => this.handleRpcMessage(message));
-    await this._rpc.connect();
+    this._rpc.attach(this._childProcess);
   }
 
   private async initializeRpc(): Promise<void> {
@@ -483,7 +517,6 @@ export class CodexAppServerPTY {
             threadId: persisted.threadId,
             cwd: this._cwd,
             ...THREAD_PERMISSION_OVERRIDES,
-            config: { features: { goals: true } },
             excludeTurns: true,
             persistExtendedHistory: true,
           });
@@ -500,7 +533,6 @@ export class CodexAppServerPTY {
           threadId: latest,
           cwd: this._cwd,
           ...THREAD_PERMISSION_OVERRIDES,
-          config: { features: { goals: true } },
           excludeTurns: true,
           persistExtendedHistory: true,
         });
@@ -512,7 +544,6 @@ export class CodexAppServerPTY {
     const started = await this.request<ThreadResponse>('thread/start', {
       cwd: this._cwd,
       ...THREAD_PERMISSION_OVERRIDES,
-      config: { features: { goals: true } },
       sessionStartSource: 'startup',
       experimentalRawEvents: false,
       persistExtendedHistory: true,
@@ -902,14 +933,31 @@ export class CodexAppServerPTY {
   }
 
   private cleanupSpawnAttempt(): void {
+    const child = this._childProcess;
+    this._childProcess = null;
+    if (child) {
+      try {
+        child.kill();
+      } catch {
+        // Ignore failed attempt cleanup errors.
+      }
+    }
     const pty = this._appServerPty;
     this._appServerPty = null;
     if (pty) {
       try {
         pty.kill();
       } catch {
-        // Ignore failed attempt cleanup errors.
+        // Ignore failed attempt cleanup errors (legacy PTY path).
       }
+    }
+    if (this._rpc) {
+      try {
+        this._rpc.close();
+      } catch {
+        // Ignore RPC close errors on cleanup.
+      }
+      this._rpc = null;
     }
     this.removeSocket();
   }
