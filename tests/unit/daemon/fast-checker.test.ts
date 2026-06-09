@@ -713,7 +713,7 @@ describe('FastChecker', () => {
       expect(result).toContain("cortextos bus send-telegram 123456789 '<your reply>'");
     });
 
-    it('does not leak the raw image path (auto-attach crash guard)', () => {
+    it('exposes the image path as a local_file line (upstream expose + sanitize)', () => {
       const result = FastChecker.formatTelegramPhotoMessage(
         'Alice',
         '999',
@@ -722,12 +722,10 @@ describe('FastChecker', () => {
       );
 
       expect(result).toContain('=== TELEGRAM PHOTO from Alice (chat_id:999) ===');
-      expect(result).not.toContain('/tmp/telegram-images/20260403_abc12345678.jpg');
-      expect(result).not.toContain('.jpg');
-      expect(result).not.toMatch(/local_file:\s*\//);
+      expect(result).toContain('local_file: /tmp/telegram-images/20260403_abc12345678.jpg');
     });
 
-    it('renders the vision description when provided and skips the suppressed-path marker', () => {
+    it('renders the vision description when provided, alongside the local_file line', () => {
       const result = FastChecker.formatTelegramPhotoMessage(
         'Alice',
         '123456789',
@@ -739,7 +737,7 @@ describe('FastChecker', () => {
       expect(result).toContain('description (auto-generated');
       expect(result).toContain('which template');
       expect(result).not.toContain('[image attached');
-      expect(result).not.toContain('/tmp/telegram-images/20260403_abc12345678.jpg');
+      expect(result).toContain('local_file: /tmp/telegram-images/20260403_abc12345678.jpg');
     });
 
     it('falls back to the suppressed-path marker on empty description', () => {

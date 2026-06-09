@@ -825,37 +825,31 @@ describe('CodexAppServerPTY thread lifecycle', () => {
       cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
+      config: { features: { goals: true } },
       excludeTurns: true,
       persistExtendedHistory: true,
     });
   });
 
-  it('resumes the persisted thread in fresh mode when state exists', async () => {
+  it('starts a fresh thread in fresh mode even when persisted state exists (mode gate)', async () => {
+    // Local customization: persisted-thread resume is gated on continue mode.
+    // In fresh mode we deliberately start a new thread rather than resume old state.
     fsMocks.existsSync.mockReturnValue(true);
     fsMocks.readFileSync.mockReturnValue(JSON.stringify({
       threadId: 'persisted-fresh-thread',
       cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
       updatedAt: '2026-05-07T00:00:00Z',
     }));
-    requestMock.mockResolvedValue({ result: { thread: { id: 'persisted-fresh-thread' } } });
+    requestMock.mockResolvedValue({ result: { thread: { id: 'fresh-thread' } } });
     const pty = new CodexAppServerPTY(mockEnv, {});
     (pty as unknown as { _rpc: { request: typeof requestMock } })._rpc = { request: requestMock };
 
     await (pty as unknown as { startOrResumeThread(mode: 'fresh' | 'continue'): Promise<void> }).startOrResumeThread('fresh');
 
-    expect(requestMock).toHaveBeenCalledWith('thread/resume', {
-      threadId: 'persisted-fresh-thread',
-      cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
-      approvalPolicy: 'never',
-      sandbox: 'danger-full-access',
-      config: { features: { goals: true } },
-      excludeTurns: true,
-      persistExtendedHistory: true,
-    });
-    expect(requestMock).not.toHaveBeenCalledWith(
-      'thread/start',
-      expect.anything(),
-    );
+    // Fresh mode must NOT resume the persisted thread (the continue-mode gate).
+    expect(requestMock).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    // It starts a brand-new thread instead.
+    expect(requestMock).toHaveBeenCalledWith('thread/start', expect.anything());
   });
 });
 
