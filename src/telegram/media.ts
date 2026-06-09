@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TelegramAPI } from './api.js';
 import { transcribeVoice } from './transcribe.js';
+import { describeImage } from './describe-image.js';
 import { TelegramMessage } from '../types/index.js';
 import { ensureDir } from '../utils/atomic.js';
 
@@ -21,6 +22,7 @@ export interface ProcessedMedia {
   file_name?: string;
   duration?: number;
   transcript?: string;
+  description?: string;
 }
 
 /**
@@ -82,6 +84,8 @@ export async function processMediaMessage(
     const data = await api.downloadFile(filePath);
     fs.writeFileSync(localFile, data);
 
+    const description = await describeImage(localFile);
+
     return {
       type: 'photo',
       chat_id: chatId,
@@ -89,6 +93,7 @@ export async function processMediaMessage(
       text: caption,
       date,
       image_path: localFile,
+      description: description || undefined,
     };
   }
 

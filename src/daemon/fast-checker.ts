@@ -313,24 +313,35 @@ ${lastSentCtx}Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
    * The raw image path is intentionally NOT injected into the agent message:
    * claude-code auto-attaches local image files referenced by path in user
    * input, which triggers `API Error: 400 image/png not supported` and wedges
-   * the session permanently (force-fresh is the only recovery). The file
-   * remains on disk at `imagePath` for a future vision-pre-call to consume.
+   * the session permanently (force-fresh is the only recovery). Instead we
+   * pre-call vision (see src/telegram/describe-image.ts) and inject the
+   * resulting text description. The file remains on disk at `imagePath` for
+   * out-of-band inspection; the path is NOT included in the injected message.
    */
   static formatTelegramPhotoMessage(
     from: string,
     chatId: string | number,
     caption: string,
     imagePath: string,
+    description?: string,
   ): string {
-    // imagePath is reserved for a future vision-side-channel that produces a
-    // text description; currently unused here to prevent auto-attach crash.
+    // imagePath is preserved for the disk-side artifact but not surfaced in
+    // the injected message — the auto-attach crash guard still applies.
     void imagePath;
+
+    const descriptionBlock = description && description.trim()
+      ? `description (auto-generated, claude-haiku-4-5 vision):
+\`\`\`
+${description.trim()}
+\`\`\``
+      : `[image attached — vision pre-call returned no description (disabled, missing ANTHROPIC_API_KEY, unsupported format, or transient error); local path suppressed to prevent claude-code auto-attach crash]`;
+
     return `=== TELEGRAM PHOTO from ${from} (chat_id:${chatId}) ===
 caption:
 \`\`\`
 ${caption}
 \`\`\`
-[image attached — local path suppressed to prevent claude-code auto-attach crash; vision pre-call not yet wired]
+${descriptionBlock}
 Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
 `;

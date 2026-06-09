@@ -110,6 +110,11 @@ export class AgentPTY {
       }
     }
 
+    const claudeCmd = this.getBinaryName();
+    if (claudeCmd.startsWith('claude')) {
+      this.stripApiBillingEnv(ptyEnv);
+    }
+
     // Add convenience CTX_* aliases used throughout agent templates.
     // CTX_TELEGRAM_CHAT_ID: alias for CHAT_ID from the agent's .env
     if (ptyEnv['CHAT_ID']) {
@@ -141,7 +146,6 @@ export class AgentPTY {
     // On Windows, npm global installs create .cmd wrappers, not .exe binaries.
     // node-pty's CreateProcess requires the exact wrapper name to resolve correctly.
     const claudeArgs = this.buildClaudeArgs(mode, prompt);
-    const claudeCmd = this.getBinaryName();
 
     this.pty = this.spawnFn!(claudeCmd, claudeArgs, {
       name: 'xterm-256color',
@@ -322,7 +326,7 @@ export class AgentPTY {
     // Copy essential env vars
     const keepVars = [
       'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL',
-      'TMPDIR', 'TEMP', 'TMP', 'ANTHROPIC_API_KEY', 'CLAUDE_API_KEY',
+      'TMPDIR', 'TEMP', 'TMP',
       'NODE_PATH', 'COMSPEC', 'USERPROFILE',
       // Windows path-expansion essentials. Stripping these causes phantom
       // %SystemDrive% directories from inherited Search Indexer processes
@@ -346,5 +350,13 @@ export class AgentPTY {
     }
 
     return env;
+  }
+
+  private stripApiBillingEnv(env: Record<string, string>): void {
+    // Claude Code should use Claude subscription/OAuth auth. If an API key is
+    // present, Claude Code may bill Console API credits instead.
+    delete env['ANTHROPIC_API_KEY'];
+    delete env['CLAUDE_API_KEY'];
+    delete env['ANTHROPIC_AUTH_TOKEN'];
   }
 }

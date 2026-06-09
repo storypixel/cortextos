@@ -698,7 +698,7 @@ describe('FastChecker', () => {
   });
 
   describe('formatTelegramPhotoMessage', () => {
-    it('formats photo message with caption and a suppressed-path marker', () => {
+    it('formats photo message with caption and a suppressed-path marker when no description', () => {
       const result = FastChecker.formatTelegramPhotoMessage(
         'Alice',
         '123456789',
@@ -725,6 +725,34 @@ describe('FastChecker', () => {
       expect(result).not.toContain('/tmp/telegram-images/20260403_abc12345678.jpg');
       expect(result).not.toContain('.jpg');
       expect(result).not.toMatch(/local_file:\s*\//);
+    });
+
+    it('renders the vision description when provided and skips the suppressed-path marker', () => {
+      const result = FastChecker.formatTelegramPhotoMessage(
+        'Alice',
+        '123456789',
+        'cap',
+        '/tmp/telegram-images/20260403_abc12345678.jpg',
+        'A screenshot of the onboarding step asking which template to use, with options orchestrator | analyst | agent.',
+      );
+
+      expect(result).toContain('description (auto-generated');
+      expect(result).toContain('which template');
+      expect(result).not.toContain('[image attached');
+      expect(result).not.toContain('/tmp/telegram-images/20260403_abc12345678.jpg');
+    });
+
+    it('falls back to the suppressed-path marker on empty description', () => {
+      const result = FastChecker.formatTelegramPhotoMessage(
+        'Alice',
+        '1',
+        '',
+        '/tmp/telegram-images/x.jpg',
+        '   ',
+      );
+
+      expect(result).toContain('[image attached');
+      expect(result).not.toContain('description (auto-generated');
     });
   });
 

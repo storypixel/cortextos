@@ -24,6 +24,10 @@ export class TelegramPoller {
   private callbackHandlers: CallbackHandler[] = [];
   private reactionHandlers: ReactionHandler[] = [];
   private pollInterval: number;
+  // Telegram-aware backoff: when a poll fails with 429 Too Many Requests, 5xx,
+  // or timeout, the loop waits this many ms before next poll (instead of the
+  // base pollInterval). Reset to 0 on the next successful poll. See start().
+  private currentBackoffMs: number = 0;
 
   /**
    * @param api Telegram API client scoped to a single bot token.
@@ -39,7 +43,7 @@ export class TelegramPoller {
    *   write to `.telegram-offset` and lose track of which bot each
    *   offset belonged to.
    */
-  constructor(api: TelegramAPI, stateDir: string, pollInterval: number = 1000, offsetFileSuffix?: string) {
+  constructor(api: TelegramAPI, stateDir: string, pollInterval: number = 3000, offsetFileSuffix?: string) {
     this.api = api;
     this.stateDir = stateDir;
     this.pollInterval = pollInterval;
@@ -98,11 +102,29 @@ export class TelegramPoller {
     while (this.running) {
       try {
         await this.pollOnce();
+        // Successful poll resets backoff to the configured base interval.
+        this.currentBackoffMs = 0;
       } catch (err) {
-        // Log error but continue polling
         console.error('[telegram-poller] Poll error:', err);
+        // Telegram-aware backoff: when getUpdates is rate-limited (429 Too Many
+        // Requests) or returns 5xx Bad Gateway/Service Unavailable, the API
+        // response includes a `retry_after` parameter in seconds. We honor it
+        // when present; otherwise we double the previous backoff (exponential),
+        // capped at 60s. This prevents tight error-spin loops from compounding
+        // the rate-limit problem they tripped.
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const retryMatch = errMsg.match(/retry after (\d+)/i);
+        if (retryMatch) {
+          this.currentBackoffMs = Math.min(parseInt(retryMatch[1], 10) * 1000, 60000);
+        } else if (/Too Many Requests|Bad Gateway|Service Unavailable|timed out/i.test(errMsg)) {
+          this.currentBackoffMs = Math.min(Math.max(this.currentBackoffMs * 2, this.pollInterval * 2), 60000);
+        } else {
+          // Non-rate-limit errors: don't pile on backoff, just sleep the base interval.
+          this.currentBackoffMs = 0;
+        }
       }
-      await sleep(this.pollInterval);
+      const wait = this.currentBackoffMs > 0 ? this.currentBackoffMs : this.pollInterval;
+      await sleep(wait);
     }
   }
 

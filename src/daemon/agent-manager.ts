@@ -54,6 +54,22 @@ export class AgentManager {
     // re-discover and re-start any agent dir on disk regardless of user intent.
     const instanceEnabled = this.readInstanceEnableList();
 
+    // Stagger interval between agent spawns on boot. Without this, 12 agents
+    // all start PTYs, hit Anthropic OAuth, and bring up Telegram pollers
+    // simultaneously — which (a) cascades OAuth refresh invalidations,
+    // (b) trips Telegram's per-IP getUpdates rate limit, and (c) tends to
+    // leave 4-8 of 13 agents in a half-bootstrapped state. Override via
+    // CTX_BOOT_STAGGER_MS env var; default 3000ms (3s) is empirically enough
+    // for each agent's auth + poller-start to settle before the next one
+    // begins. Pass 0 to disable for testing or single-agent installs.
+    const staggerMs = (() => {
+      const raw = process.env.CTX_BOOT_STAGGER_MS;
+      if (raw === undefined) return 3000;
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) && n >= 0 ? n : 3000;
+    })();
+
+    let spawnIndex = 0;
     for (const { name, dir, org, config } of agentDirs) {
       // Per-agent config.json `enabled: false` (existing behavior, unchanged)
       if (config.enabled === false) {
@@ -66,6 +82,12 @@ export class AgentManager {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
+      // Stagger after the first agent: wait `staggerMs` between successive
+      // spawns to avoid the simultaneous-bootstrap cascade documented above.
+      if (spawnIndex > 0 && staggerMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, staggerMs));
+      }
+      spawnIndex += 1;
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
       // of falling back to `this.org` (the daemon's startup org).
       await this.startAgent(name, dir, config, org);
@@ -406,7 +428,7 @@ export class AgentManager {
             log(`[DEBUG] media.type=${media.type} image_path=${JSON.stringify(relImagePath)} file_path=${JSON.stringify(relFilePath)}`);
             let formatted: string;
             if (media.type === 'photo') {
-              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath);
+              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath, media.description);
             } else if (media.type === 'document') {
               formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!);
             } else if (media.type === 'voice' || media.type === 'audio') {
