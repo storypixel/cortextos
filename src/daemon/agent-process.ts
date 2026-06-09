@@ -299,6 +299,23 @@ export class AgentProcess {
    */
   async sessionRefresh(): Promise<void> {
     this.log('Session refresh (--continue restart)');
+    // Write .session-refresh marker so the SessionEnd crash-alert hook
+    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+    // session refresh rather than a crash. The hook's marker handler +
+    // quiet-suppression set + message switch were all wired for this type,
+    // but no writer existed — every --continue rollover at the session-time
+    // cap surfaced as a false-positive 'crash' on chief/analyst + the
+    // crashes.log file.
+    try {
+      const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+      writeFileSync(
+        join(paths.stateDir, '.session-refresh'),
+        'session-time-cap rollover\n',
+        'utf-8',
+      );
+    } catch (err) {
+      this.log(`Failed to write .session-refresh marker: ${err}`);
+    }
     await this.stop();
     await this.start();
     this.log('Session refreshed');
@@ -530,15 +547,28 @@ export class AgentProcess {
     }
 
     // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
-    // Runs BEFORE crash counters so it doesn't poison either of them.
+    // Checked FIRST so a poisoned-context crash neither trips the crash-loop
+    // window nor charges the daily counter — it is an upstream artifact, not
+    // an agent malfunction.
     //
     // Claude Code crashes with `API Error: 400 messages.N.content.M.image.source.base64.data:
     // Image format image/<fmt> not supported` when conversation history holds a
     // base64-encoded image whose claimed media_type does not match the actual
     // bytes. The poison is permanent: every `--continue` restart reloads the
-    // same conversation history and re-hits the same 400. PR #446 stopped
-    // NEW poisoning; this block recovers OLD poisoned contexts by force-fresh
-    // without charging the crash counter.
+    // same conversation history and re-hits the same 400, so the agent
+    // crash-loops until it exhausts max_crashes_per_day and the daemon halts.
+    //
+    // This block covers agents that ALREADY have a poisoned context: detect
+    // the 400 signature in the recent stdout, write `.force-fresh` so the next
+    // start discards the saved conversation, and respawn WITHOUT charging the
+    // crash counter. (The photo-suppression source fix from #446 was superseded
+    // by the Track-2 byte-sniff mime reconciliation; this recovery block is the
+    // independent resilience half and stands on its own.)
+    //
+    // Exit is always code 0 in this failure mode (Claude Code surfaces the
+    // 400 to the user then exits cleanly), so we gate on both exit code and
+    // the error signature to avoid false positives that would skip a real
+    // crash counter increment.
     if (exitCode === 0 && this.detectImagePoisonCrash(recentOutput)) {
       this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
       this.armForceFresh('image-poison auto-recovery');
@@ -616,7 +646,7 @@ export class AgentProcess {
       return hermesDbExists(hermesHome);
     }
 
-    // Check for force-fresh marker
+    // Check for force-fresh marker (all runtimes honor it).
     const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
     if (existsSync(forceFreshPath)) {
       try {
@@ -626,7 +656,24 @@ export class AgentProcess {
       return false;
     }
 
-    // Check for existing conversation
+    // codex-app-server: session continuity is tracked by the adapter's own
+    // codex-app-server-thread.json under ctxRoot/state/<agent>/. The Claude
+    // JSONL check below is meaningless for the codex runtime, and a stale
+    // Claude JSONL left over from a prior Claude-runtime tenure caused
+    // continue-mode → thread/resume timeout → exit_code=0 crash loop
+    // (testorg codex-agent crashed 3x with this signature on 2026-05-09,
+    // 05-14, and 05-16 before backoff drained the pending resume RPC).
+    if (this.config.runtime === 'codex-app-server') {
+      const threadStatePath = join(
+        this.env.ctxRoot,
+        'state',
+        this.name,
+        'codex-app-server-thread.json',
+      );
+      return existsSync(threadStatePath);
+    }
+
+    // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
     if (!launchDir) return false;
 
