@@ -998,8 +998,11 @@ export class AgentManager {
       if (!existsSync(agentsBase)) continue;
 
       try {
+        // Skip hidden dirs (e.g. `.planned` draft-agent specs) — a dotted dir
+        // has no config.json, so it would otherwise default to enabled and the
+        // daemon would spawn a ghost agent session for it.
         const dirs = readdirSync(agentsBase, { withFileTypes: true })
-          .filter(d => d.isDirectory())
+          .filter(d => d.isDirectory() && !d.name.startsWith('.'))
           .map(d => d.name);
 
         for (const name of dirs) {
