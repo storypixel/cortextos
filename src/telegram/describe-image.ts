@@ -16,6 +16,29 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { readClaudeOauthToken } from '../utils/claude-oauth';
+
+/**
+ * Resolve the Anthropic credential at CALL TIME, not at process-start time.
+ *
+ * A real workspace API key (sk-ant-api…) is stable, so an explicit one in the
+ * environment wins. Otherwise we read the Max-plan OAuth token (sk-ant-oat…)
+ * FRESH from the platform credential store on every call (macOS Keychain, or
+ * ~/.claude/.credentials.json on Linux). OAuth tokens rotate every few
+ * hours; the daemon's process-scope ANTHROPIC_API_KEY is captured once at PM2
+ * start (ecosystem.config.js) and goes stale on rotation, which silently broke
+ * vision pre-calls until a manual daemon restart. Reading fresh here picks up
+ * rotation automatically — no restart required. Falls back to the (possibly
+ * stale) env value if the Keychain read is unavailable.
+ */
+function resolveApiKey(): string | undefined {
+  const env = process.env.ANTHROPIC_API_KEY;
+  if (env && env.startsWith('sk-ant-api')) return env;
+  // Cross-platform: Keychain on macOS, ~/.claude/.credentials.json elsewhere.
+  const tok = readClaudeOauthToken();
+  if (tok) return tok;
+  return env;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MODEL = 'claude-haiku-4-5';
@@ -51,7 +74,7 @@ export async function describeImage(
   if (process.env.CTX_TELEGRAM_NO_VISION === '1') return null;
   if (!imagePath || !fs.existsSync(imagePath)) return null;
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = resolveApiKey();
   if (!apiKey) return null;
 
   const log = opts.log || (() => {});

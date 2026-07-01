@@ -131,21 +131,30 @@ export const ecosystemCommand = new Command('ecosystem')
 // pre-calls Anthropic vision to convert it to a text description (raw image
 // paths can't be injected into claude-code without triggering an image-poison
 // crash). That pre-call needs ANTHROPIC_API_KEY at daemon-process scope.
-// readClaudeOauthToken() pulls the Max-plan OAuth token from the macOS
-// Keychain at PM2 start time, so token rotation is picked up on each restart.
-// On non-macOS hosts or hosts without Claude Code installed, the helper
-// returns '' and the daemon falls back to the suppressed-path stub message.
+// readClaudeOauthToken() pulls the Max-plan OAuth token from the platform
+// credential store at PM2 start time (macOS Keychain, or Claude Code's
+// ~/.claude/.credentials.json on Linux), so token rotation is picked up on
+// each restart. On hosts without Claude Code installed, the helper returns
+// '' and the daemon falls back to the suppressed-path stub message.
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 function readClaudeOauthToken() {
-  if (process.platform !== 'darwin') return '';
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync(
+        'security',
+        ['find-generic-password', '-s', 'Claude Code-credentials', '-a', os.userInfo().username, '-w'],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      const tok = JSON.parse(out).claudeAiOauth.accessToken;
+      if (tok) return tok;
+    } catch (_) { /* fall through to file */ }
+  }
   try {
-    const out = execFileSync(
-      'security',
-      ['find-generic-password', '-s', 'Claude Code-credentials', '-a', os.userInfo().username, '-w'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
-    return JSON.parse(out).claudeAiOauth.accessToken || '';
+    const p = path.join(os.homedir(), '.claude', '.credentials.json');
+    return JSON.parse(fs.readFileSync(p, 'utf-8')).claudeAiOauth.accessToken || '';
   } catch (_) {
     return '';
   }
