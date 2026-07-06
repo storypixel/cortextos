@@ -254,7 +254,11 @@ export function isClaudeDirOperation(
   // thing left to vet.
   const canonAgentDir = canonicalizePath(resolve(base));
   const claudeRoot = join(canonAgentDir, '.claude');
-  const target = resolve(canonAgentDir, filePath);
+  // Canonicalize the target the same way: an absolute file_path under a
+  // symlinked install prefix (macOS /var -> /private/var) must compare against
+  // the canonical agent dir, and a symlink escape resolves outside claudeRoot
+  // where the containment check below refuses it.
+  const target = canonicalizePath(resolve(canonAgentDir, filePath));
 
   // Lexical containment within the agent's own .claude/.
   if (target !== claudeRoot && !target.startsWith(claudeRoot + sep)) return false;
