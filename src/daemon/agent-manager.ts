@@ -121,22 +121,6 @@ export class AgentManager {
     // re-discover and re-start any agent dir on disk regardless of user intent.
     const instanceEnabled = this.readInstanceEnableList();
 
-    // Stagger interval between agent spawns on boot. Without this, 12 agents
-    // all start PTYs, hit Anthropic OAuth, and bring up Telegram pollers
-    // simultaneously — which (a) cascades OAuth refresh invalidations,
-    // (b) trips Telegram's per-IP getUpdates rate limit, and (c) tends to
-    // leave 4-8 of 13 agents in a half-bootstrapped state. Override via
-    // CTX_BOOT_STAGGER_MS env var; default 3000ms (3s) is empirically enough
-    // for each agent's auth + poller-start to settle before the next one
-    // begins. Pass 0 to disable for testing or single-agent installs.
-    const staggerMs = (() => {
-      const raw = process.env.CTX_BOOT_STAGGER_MS;
-      if (raw === undefined) return 3000;
-      const n = parseInt(raw, 10);
-      return Number.isFinite(n) && n >= 0 ? n : 3000;
-    })();
-
-    let spawnIndex = 0;
     for (const { name, dir, org, config } of agentDirs) {
       // Per-agent config.json `enabled: false` (existing behavior, unchanged)
       if (config.enabled === false) {
@@ -149,12 +133,6 @@ export class AgentManager {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
-      // Stagger after the first agent: wait `staggerMs` between successive
-      // spawns to avoid the simultaneous-bootstrap cascade documented above.
-      if (spawnIndex > 0 && staggerMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, staggerMs));
-      }
-      spawnIndex += 1;
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
       // of falling back to `this.org` (the daemon's startup org).
       await this.startAgent(name, dir, config, org);
@@ -528,6 +506,7 @@ export class AgentManager {
 
         // Check for media messages (photo, document, voice, audio, video, video_note)
         const isMedia = !!(msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note);
+        const replyToText = buildReplyContext(msg.reply_to_message);
 
         if (isMedia && telegramApi) {
           const downloadDir = join(agentDir, 'telegram-images');
@@ -535,7 +514,7 @@ export class AgentManager {
             if (!media) {
               log('Media processing returned null - falling back to text format');
               const text = stripControlChars(msg.caption || '');
-              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
               if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
               return;
             }
@@ -553,14 +532,14 @@ export class AgentManager {
             log(`[DEBUG] media.type=${media.type} image_path=${JSON.stringify(relImagePath)} file_path=${JSON.stringify(relFilePath)}`);
             let formatted: string;
             if (media.type === 'photo') {
-              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath, media.description);
+              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath, replyToText);
             } else if (media.type === 'document') {
-              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!);
+              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!, replyToText);
             } else if (media.type === 'voice' || media.type === 'audio') {
-              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript);
+              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript, replyToText);
             } else {
               // video or video_note
-              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration);
+              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration, replyToText);
             }
 
             if (checker.isDuplicate(formatted)) {
@@ -572,7 +551,7 @@ export class AgentManager {
           }).catch((err) => {
             log(`Media processing error: ${err} - falling back to text format`);
             const text = stripControlChars(msg.caption || '');
-            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
             if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
           });
           return;
@@ -581,8 +560,6 @@ export class AgentManager {
         // Text message (non-media)
         const text = stripControlChars(msg.text || '');
         const lastSent = FastChecker.readLastSent(stateDir, effectiveChatId);
-        // Build reply context from the replied-to message.
-        const replyToText = buildReplyContext(msg.reply_to_message);
 
         const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6) ?? undefined;
         const formatted = FastChecker.formatTelegramTextMessage(
@@ -593,7 +570,6 @@ export class AgentManager {
           replyToText,
           lastSent ?? undefined,
           recentHistory,
-          msg.message_id,
         );
 
         if (checker.isDuplicate(formatted)) {
@@ -1237,11 +1213,8 @@ export class AgentManager {
       if (!existsSync(agentsBase)) continue;
 
       try {
-        // Skip hidden dirs (e.g. `.planned` draft-agent specs) — a dotted dir
-        // has no config.json, so it would otherwise default to enabled and the
-        // daemon would spawn a ghost agent session for it.
         const dirs = readdirSync(agentsBase, { withFileTypes: true })
-          .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+          .filter(d => d.isDirectory())
           .map(d => d.name);
 
         for (const name of dirs) {
@@ -1314,13 +1287,20 @@ export function buildReplyContext(
   replyMsg: TelegramMessage | undefined,
 ): string | undefined {
   if (!replyMsg) return undefined;
-  if (replyMsg.text) return stripControlChars(replyMsg.text);
-  if (replyMsg.caption) return stripControlChars(replyMsg.caption);
-  if (replyMsg.video) return '[video]';
-  if (replyMsg.video_note) return '[video note]';
-  if (replyMsg.photo) return '[photo]';
-  if (replyMsg.voice) return '[voice message]';
-  if (replyMsg.audio) return '[audio]';
-  if (replyMsg.document) return `[document: ${replyMsg.document.file_name ?? 'file'}]`;
+  const parts: string[] = [];
+  if (replyMsg.text) {
+    parts.push(stripControlChars(replyMsg.text));
+  } else if (replyMsg.caption) {
+    parts.push(stripControlChars(replyMsg.caption));
+  }
+
+  if (replyMsg.document) parts.push(`[document: ${replyMsg.document.file_name ?? 'file'}]`);
+  if (replyMsg.photo) parts.push('[photo]');
+  if (replyMsg.video) parts.push('[video]');
+  if (replyMsg.video_note) parts.push('[video note]');
+  if (replyMsg.voice) parts.push('[voice message]');
+  if (replyMsg.audio) parts.push('[audio]');
+
+  if (parts.length > 0) return parts.join('\n');
   return undefined;
 }

@@ -105,21 +105,6 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     expect(startSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('skips hidden (dot-prefixed) dirs like .planned draft folders', async () => {
-    // A drafts folder (e.g. orgs/<org>/agents/.planned) has no config.json,
-    // so without the dot-dir filter it defaults to enabled and the daemon
-    // spawns a ghost agent session for it.
-    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', '.planned'), { recursive: true });
-
-    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
-
-    await am.discoverAndStart();
-
-    const namesStarted = startSpy.mock.calls.map(call => call[0]).sort();
-    expect(namesStarted).toEqual(['alice', 'bob']);
-  });
-
   it('still respects per-agent config.json enabled: false (existing behavior)', async () => {
     // Per-agent config.json takes precedence — this is the legacy behavior we
     // explicitly preserved in the BUG-028 fix
@@ -314,7 +299,17 @@ describe('buildReplyContext - Telegram reply context (BUG fix: media replies los
 
   it('returns caption for media messages with captions', () => {
     const msg = { message_id: 2, chat: { id: 1 }, photo: [{ file_id: 'x', width: 100, height: 100, file_size: 1 }], caption: 'Check this out' };
-    expect(buildReplyContext(msg)).toBe('Check this out');
+    expect(buildReplyContext(msg)).toBe('Check this out\n[photo]');
+  });
+
+  it('returns caption plus document name for document replies with captions', () => {
+    const msg = {
+      message_id: 12,
+      chat: { id: 1 },
+      caption: 'Code review done — full HTML breakdown attached.',
+      document: { file_id: 'd3', file_name: 'hermes-memory-review.html' },
+    };
+    expect(buildReplyContext(msg)).toBe('Code review done — full HTML breakdown attached.\n[document: hermes-memory-review.html]');
   });
 
   it('returns [video] for video messages without caption', () => {

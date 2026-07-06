@@ -226,16 +226,15 @@ if [[ "$FORCE" == "false" && -f "$CACHE_FILE" ]]; then
   fi
 fi
 
-# ── Read OAuth token (macOS Keychain, or ~/.claude/.credentials.json) ───────
-RAW_CREDS=""
-if command -v security &>/dev/null; then
-  RAW_CREDS=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+# ── Read OAuth token from Keychain ──────────────────────────────────────────
+if ! command -v security &>/dev/null; then
+  echo '{"error":"macOS Keychain (security) not available"}' >&2
+  exit 1
 fi
-if [[ -z "$RAW_CREDS" && -r "$HOME/.claude/.credentials.json" ]]; then
-  RAW_CREDS=$(cat "$HOME/.claude/.credentials.json")
-fi
+
+RAW_CREDS=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
 if [[ -z "$RAW_CREDS" ]]; then
-  echo '{"error":"Claude Code credentials not found (Keychain or ~/.claude/.credentials.json)"}' >&2
+  echo '{"error":"Claude Code credentials not found in Keychain"}' >&2
   exit 1
 fi
 

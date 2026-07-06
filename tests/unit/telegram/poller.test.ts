@@ -222,90 +222,23 @@ describe('TelegramPoller — offset-after-handler', () => {
       expect(persisted).toBe('0');
     }
   });
-});
 
-function makeEditedMessageUpdate(updateId: number, messageId: number, text: string): TelegramUpdate {
-  return {
-    update_id: updateId,
-    edited_message: {
-      message_id: messageId,
-      chat: { id: 1, type: 'private' },
-      text,
-      edit_date: 1700000000,
-    } as any,
-  };
-}
-
-describe('TelegramPoller — edited_message handling', () => {
-  let stateDir: string;
-
-  beforeEach(() => {
-    stateDir = mkdtempSync(join(tmpdir(), 'cortextos-poller-edit-'));
-  });
-
-  afterEach(() => {
-    rmSync(stateDir, { recursive: true, force: true });
-  });
-
-  it('does NOT fire onMessage handlers for edited_message updates (avoids double-reply)', async () => {
-    const { api } = makeStubApi([makeEditedMessageUpdate(200, 5, 'hello (edited)')]);
+  it('does not convert an intentional stop during an in-flight Conflict into a restartable conflict exit', async () => {
+    let rejectPoll: ((err: Error) => void) | undefined;
+    const api = {
+      getUpdates: vi.fn(() => new Promise((_resolve, reject) => {
+        rejectPoll = reject;
+      })),
+    } as unknown as TelegramAPI;
     const poller = new TelegramPoller(api, stateDir);
 
-    const messageReceived: string[] = [];
-    poller.onMessage((msg) => {
-      messageReceived.push(msg.text ?? '');
-    });
+    const running = poller.start();
+    await vi.waitFor(() => expect(api.getUpdates).toHaveBeenCalled());
 
-    await poller.pollOnce();
+    poller.stop();
+    rejectPoll?.(new Error('Telegram API error: Conflict: terminated by other getUpdates request'));
 
-    expect(messageReceived).toEqual([]);
-  });
-
-  it('fires onEditedMessage handlers when an edit arrives', async () => {
-    const { api } = makeStubApi([makeEditedMessageUpdate(201, 5, 'hello (edited)')]);
-    const poller = new TelegramPoller(api, stateDir);
-
-    const edits: { id: number; text: string }[] = [];
-    poller.onEditedMessage((msg) => {
-      edits.push({ id: msg.message_id, text: msg.text ?? '' });
-    });
-
-    await poller.pollOnce();
-
-    expect(edits).toEqual([{ id: 5, text: 'hello (edited)' }]);
-  });
-
-  it('advances offset after edited_message handler succeeds', async () => {
-    const { api } = makeStubApi([makeEditedMessageUpdate(202, 5, 'edited')]);
-    const poller = new TelegramPoller(api, stateDir);
-
-    poller.onEditedMessage(() => {
-      // ok
-    });
-
-    await poller.pollOnce();
-
-    const offsetFile = join(stateDir, '.telegram-offset');
-    expect(existsSync(offsetFile)).toBe(true);
-    expect(readFileSync(offsetFile, 'utf-8')).toBe('203');
-  });
-
-  it('keeps offset un-advanced if onEditedMessage handler throws', async () => {
-    const { api } = makeStubApi([makeEditedMessageUpdate(203, 5, 'edited')]);
-    const poller = new TelegramPoller(api, stateDir);
-
-    poller.onEditedMessage(() => {
-      throw new Error('boom');
-    });
-
-    await poller.pollOnce();
-
-    const offsetFile = join(stateDir, '.telegram-offset');
-    // Either the file does not exist yet (no successful update) or it
-    // remained at the pre-update value (0). Either is acceptable; the
-    // critical invariant is that we did NOT advance to 204.
-    if (existsSync(offsetFile)) {
-      expect(readFileSync(offsetFile, 'utf-8')).not.toBe('204');
-    }
+    await expect(running).resolves.toBeUndefined();
+    expect(poller.lastExitReason).toBe('stopped-externally');
   });
 });

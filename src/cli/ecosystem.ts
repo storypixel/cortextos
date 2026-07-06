@@ -126,39 +126,6 @@ export const ecosystemCommand = new Command('ecosystem')
 // Note: env vars use process.env.X || 'default' so PM2 picks up the value
 // from the calling shell at startup time. This means \`CTX_INSTANCE_ID=foo
 // pm2 restart cortextos-daemon\` switches instances without regenerating.
-//
-// Vision pre-call: when a Telegram image arrives at any agent, the daemon
-// pre-calls Anthropic vision to convert it to a text description (raw image
-// paths can't be injected into claude-code without triggering an image-poison
-// crash). That pre-call needs ANTHROPIC_API_KEY at daemon-process scope.
-// readClaudeOauthToken() pulls the Max-plan OAuth token from the platform
-// credential store at PM2 start time (macOS Keychain, or Claude Code's
-// ~/.claude/.credentials.json on Linux), so token rotation is picked up on
-// each restart. On hosts without Claude Code installed, the helper returns
-// '' and the daemon falls back to the suppressed-path stub message.
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
-const { execFileSync } = require('child_process');
-function readClaudeOauthToken() {
-  if (process.platform === 'darwin') {
-    try {
-      const out = execFileSync(
-        'security',
-        ['find-generic-password', '-s', 'Claude Code-credentials', '-a', os.userInfo().username, '-w'],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-      );
-      const tok = JSON.parse(out).claudeAiOauth.accessToken;
-      if (tok) return tok;
-    } catch (_) { /* fall through to file */ }
-  }
-  try {
-    const p = path.join(os.homedir(), '.claude', '.credentials.json');
-    return JSON.parse(fs.readFileSync(p, 'utf-8')).claudeAiOauth.accessToken || '';
-  } catch (_) {
-    return '';
-  }
-}
 module.exports = {
   apps: [
     {
@@ -172,7 +139,6 @@ module.exports = {
         CTX_FRAMEWORK_ROOT: ${JSON.stringify(projectRoot)},
         CTX_PROJECT_ROOT: ${JSON.stringify(projectRoot)},
         CTX_ORG: process.env.CTX_ORG || ${JSON.stringify(detectedOrg)},
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || readClaudeOauthToken(),
       },
       max_restarts: 50,
       restart_delay: 5000,

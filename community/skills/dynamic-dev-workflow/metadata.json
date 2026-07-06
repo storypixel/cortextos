@@ -1,0 +1,15 @@
+{
+  "name": "dynamic-dev-workflow",
+  "type": "skill",
+  "description": "Ready-to-run dynamic dev Workflow: Sonnet explores, Fable 5 plans + decomposes, parallel implementers each in an isolated git worktree, Opus 4.8 integrates + reviews. For large/multi-file dev tasks.",
+  "author": "bonayrindustries",
+  "tags": [
+    "claude-code",
+    "workflows",
+    "orchestration",
+    "dev",
+    "worktree",
+    "fable5"
+  ],
+  "entrypoint": "SKILL.md"
+}

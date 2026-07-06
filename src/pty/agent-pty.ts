@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { platform } from 'os';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
+import { injectMessage as injectMessageIntoPty } from './inject.js';
 
 // node-pty types
 interface IPty {
@@ -32,8 +33,8 @@ export class AgentPTY {
   private pty: IPty | null = null;
   private _alive = false;
   private outputBuffer: OutputBuffer;
-  private env: CtxEnv;
-  private config: AgentConfig;
+  protected env: CtxEnv;
+  protected config: AgentConfig;
   private onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private spawnFn: SpawnFn | null = null;
 
@@ -110,11 +111,6 @@ export class AgentPTY {
       }
     }
 
-    const claudeCmd = this.getBinaryName();
-    if (claudeCmd.startsWith('claude')) {
-      this.stripApiBillingEnv(ptyEnv);
-    }
-
     // Add convenience CTX_* aliases used throughout agent templates.
     // CTX_TELEGRAM_CHAT_ID: alias for CHAT_ID from the agent's .env
     if (ptyEnv['CHAT_ID']) {
@@ -141,11 +137,14 @@ export class AgentPTY {
       } catch { /* leave unset if context.json is missing or malformed */ }
     }
 
+    this.customizeEnv(ptyEnv);
+
     // Spawn the agent binary directly (no shell wrapper) — cross-platform, no shell escaping needed.
     // env is passed natively via node-pty options; no bash export commands required.
     // On Windows, npm global installs create .cmd wrappers, not .exe binaries.
     // node-pty's CreateProcess requires the exact wrapper name to resolve correctly.
     const claudeArgs = this.buildClaudeArgs(mode, prompt);
+    const claudeCmd = this.getBinaryName();
 
     this.pty = this.spawnFn!(claudeCmd, claudeArgs, {
       name: 'xterm-256color',
@@ -284,6 +283,15 @@ export class AgentPTY {
   }
 
   /**
+   * Runtime-specific env hook. Subclasses such as OpencodePTY use this to add
+   * CLI-specific isolation variables while keeping AgentPTY's shared cortextOS
+   * env/secrets loading path in one place.
+   */
+  protected customizeEnv(_env: Record<string, string>): void {
+    // Default Claude Code runtime has no extra env.
+  }
+
+  /**
    * Write data to the PTY.
    */
   write(data: string): void {
@@ -291,6 +299,17 @@ export class AgentPTY {
       throw new Error('PTY not spawned');
     }
     this.pty.write(data);
+  }
+
+  /**
+   * Inject a complete inbound message into the runtime.
+   *
+   * Claude Code accepts bracketed paste reliably, so the base implementation
+   * keeps the historical shared injector. Runtime subclasses can override this
+   * when their TUI has different paste semantics.
+   */
+  injectMessage(content: string): void {
+    injectMessageIntoPty((data) => this.write(data), content);
   }
 
   /**
@@ -343,7 +362,7 @@ export class AgentPTY {
     // Copy essential env vars
     const keepVars = [
       'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL',
-      'TMPDIR', 'TEMP', 'TMP',
+      'TMPDIR', 'TEMP', 'TMP', 'ANTHROPIC_API_KEY', 'CLAUDE_API_KEY',
       'NODE_PATH', 'COMSPEC', 'USERPROFILE',
       // Windows path-expansion essentials. Stripping these causes phantom
       // %SystemDrive% directories from inherited Search Indexer processes
@@ -367,13 +386,5 @@ export class AgentPTY {
     }
 
     return env;
-  }
-
-  private stripApiBillingEnv(env: Record<string, string>): void {
-    // Claude Code should use Claude subscription/OAuth auth. If an API key is
-    // present, Claude Code may bill Console API credits instead.
-    delete env['ANTHROPIC_API_KEY'];
-    delete env['CLAUDE_API_KEY'];
-    delete env['ANTHROPIC_AUTH_TOKEN'];
   }
 }

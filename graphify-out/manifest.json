@@ -1,0 +1,366 @@
+{
+  "/Users/swilson/projects/cortextos/src/types/index.ts": {
+    "mtime": 1781968688.0540779,
+    "hash": "3fbfd7add73eaace61986c3f543d3d75"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/hermes-pty.ts": {
+    "mtime": 1776727291.933378,
+    "hash": "4d5466d51d655aa11406bb0e4ee93e14"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/redact.ts": {
+    "mtime": 1776228986.9338517,
+    "hash": "86c5cdf1a89fb41b56caf1ff2dcfe7bd"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/inject.ts": {
+    "mtime": 1777078046.8432405,
+    "hash": "78b4fc967dd5a646fc94d79b6cf4708b"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/output-buffer.ts": {
+    "mtime": 1776727291.933724,
+    "hash": "584a5b81b1d543c66c8edfc9af2dde5b"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/index.ts": {
+    "mtime": 1778367102.040091,
+    "hash": "755c8870813b336b602f43315c0be657"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/codex-app-server-pty.ts": {
+    "mtime": 1781968688.0530784,
+    "hash": "08bb822e20784d197261dc2c2957b3f6"
+  },
+  "/Users/swilson/projects/cortextos/src/pty/agent-pty.ts": {
+    "mtime": 1781968688.0529509,
+    "hash": "30ce223f117ff9048c1b7b72cc7c3164"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/oauth.ts": {
+    "mtime": 1781968688.0519514,
+    "hash": "21574123fa36dbf741f75f4c496c3fc6"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/crons.ts": {
+    "mtime": 1778083415.9606402,
+    "hash": "ccd8662217cfccc43cbbafcd565efef4"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/heartbeat.ts": {
+    "mtime": 1781273786.3564668,
+    "hash": "c2518fa8f211537019c31b4629a933fa"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/approval.ts": {
+    "mtime": 1778083415.960448,
+    "hash": "a08cae38da34f93874e8da7cfd39952f"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/cron-state.ts": {
+    "mtime": 1777078046.840386,
+    "hash": "5fa69ccac1fbe5dd52793f6aad663615"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/experiment.ts": {
+    "mtime": 1778367102.0345097,
+    "hash": "dd1de2e49788f3fdf20aff9a360911ec"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/agents.ts": {
+    "mtime": 1776087681.3808951,
+    "hash": "9a0253b03cf5fdddfebb786ae1ceccda"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/reminders.ts": {
+    "mtime": 1775556829.2605774,
+    "hash": "d50bfc7202f808013f104cd251fbd17a"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/message.ts": {
+    "mtime": 1775382493.0795577,
+    "hash": "0c1f24f55cc1fba34c09d94de4a23b03"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/knowledge-base.ts": {
+    "mtime": 1778083415.9608839,
+    "hash": "0b0b4ee3203830f1d3fc39d0aca96348"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/save-output.ts": {
+    "mtime": 1781273786.3575435,
+    "hash": "fb4ad6feb1010c6cbeb2fcfac55acabe"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/index.ts": {
+    "mtime": 1775382493.0792582,
+    "hash": "5d854df6d6883810c151d96025ed66bf"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/crons-schema.ts": {
+    "mtime": 1778083415.9605052,
+    "hash": "48e7352b47bd210a0ef24eb6b81c0463"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/event.ts": {
+    "mtime": 1778367102.034064,
+    "hash": "39b0ad2919f8a2b8e5a2a5c06bb12abb"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/system.ts": {
+    "mtime": 1776228986.9308696,
+    "hash": "0fa133301df2e58c6c7d4a1eaf411061"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/hooks.ts": {
+    "mtime": 1781273786.3570862,
+    "hash": "cf5a609ad8b47d6c2c4b399e97ac2590"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/metrics.ts": {
+    "mtime": 1782689937.4566624,
+    "hash": "820b881c65b73001df62e092dc2a2ebd"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/task.ts": {
+    "mtime": 1781273786.3582547,
+    "hash": "d17b2a09ded7dac759cbddc07637ceaa"
+  },
+  "/Users/swilson/projects/cortextos/src/bus/catalog.ts": {
+    "mtime": 1776439545.6839554,
+    "hash": "da1ecf6f1a2d2ee34b5c8c3b52a420c8"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/atomic.ts": {
+    "mtime": 1778083415.9637685,
+    "hash": "a281109f8a1c29c12f54d585da7ed535"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/strip-bom.ts": {
+    "mtime": 1781273786.3680782,
+    "hash": "b768ee0c85bf9f2c62180df2539849b7"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/lock.ts": {
+    "mtime": 1778083415.9651313,
+    "hash": "9323a62f6fbc2579400308ef2ea9ec89"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/stdio-jsonrpc-client.ts": {
+    "mtime": 1781968688.054179,
+    "hash": "a1a9fb703b932f737c6f9c327cca9b7f"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/validate.ts": {
+    "mtime": 1781273786.368269,
+    "hash": "a08b878ad0cf4833106ccf9a19a27f17"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/random.ts": {
+    "mtime": 1775382493.0861635,
+    "hash": "fd90e7b36d97c64775e0fc4c0122410e"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/ws-unix-client.ts": {
+    "mtime": 1778367102.040853,
+    "hash": "4f974b8fcb451df74847a5b15475ca4f"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/index.ts": {
+    "mtime": 1775382493.0859632,
+    "hash": "f88de2106ba4eec7f44da9fad239623c"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/paths.ts": {
+    "mtime": 1776356304.0786815,
+    "hash": "f28ece46cafa878c790834bd5bc1d8b6"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/allowed-roots.ts": {
+    "mtime": 1781273786.3673916,
+    "hash": "af3621ef4982a1c5417ce4849035fa07"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/env.ts": {
+    "mtime": 1781273786.3680022,
+    "hash": "d0758d33e47270eb8ab456dc43f79dc9"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/org.ts": {
+    "mtime": 1776546787.8400984,
+    "hash": "2c007068fe204a9d7638c2a9c739f022"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/cron-health.ts": {
+    "mtime": 1778083415.9639058,
+    "hash": "0083cd5072d87e99fa10ad1e3f7d1286"
+  },
+  "/Users/swilson/projects/cortextos/src/utils/cron-teaching-scanner.ts": {
+    "mtime": 1778083415.9641027,
+    "hash": "00ab8b5c39c2503f4195cb87bdbcea8a"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/get-config.ts": {
+    "mtime": 1781273786.360308,
+    "hash": "a885e218243878f7678b8439db68259e"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/status.ts": {
+    "mtime": 1775700813.1706448,
+    "hash": "b4e51c4e9ab82ad3598326a5925cbeec"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/list-agents.ts": {
+    "mtime": 1775556829.262333,
+    "hash": "0dc3b793e8adbdbf0a64d105334db003"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/doctor.ts": {
+    "mtime": 1782704506.3312023,
+    "hash": "199802215e2a9137d4d27772fc7ef9f9"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/ecosystem.ts": {
+    "mtime": 1781968688.052085,
+    "hash": "c24aad6f6c96499cb63c8d26fb8d41d7"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/init.ts": {
+    "mtime": 1781273786.3609571,
+    "hash": "1bff2091ef2dc748747da4504a7714bd"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/notify-agent.ts": {
+    "mtime": 1775382493.0828295,
+    "hash": "c34c9a789c30985c8f370d38dac1d856"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/workers.ts": {
+    "mtime": 1775382493.08352,
+    "hash": "3dc25c0178efb85e8aadb93b561ff945"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/install.ts": {
+    "mtime": 1778507882.3240938,
+    "hash": "c27da3c0d5c42d6f7510206192fa941c"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/uninstall.ts": {
+    "mtime": 1775382493.0834475,
+    "hash": "1874247ba7e580dbd1b4876f1ce07867"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/list-skills.ts": {
+    "mtime": 1775382493.0827649,
+    "hash": "a0861b0da68edaaf03215e59c8c15d4c"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/setup.ts": {
+    "mtime": 1781273786.3614852,
+    "hash": "5abf31ad16ce901f1c34991cace6b336"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/restart.ts": {
+    "mtime": 1778367102.0378664,
+    "hash": "400dfe065e4cce89d86aa02e0b085a9c"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/bus.ts": {
+    "mtime": 1781273786.359624,
+    "hash": "884f8c6ca57e88ac038908bb526c1a10"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/dashboard.ts": {
+    "mtime": 1776439545.684901,
+    "hash": "03b202cb458947a7ea51b03583cf017b"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/start.ts": {
+    "mtime": 1781273786.3620899,
+    "hash": "9b20705b444e1281d7823a3b17faa09e"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/import-agent.ts": {
+    "mtime": 1781273786.3606632,
+    "hash": "56eb9841bbe842b4c8bc49f9af096b1c"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/tunnel.ts": {
+    "mtime": 1781273786.3624475,
+    "hash": "e766862bcfe7d4c944ef44d5d527b32e"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/add-agent.ts": {
+    "mtime": 1781273786.3590171,
+    "hash": "72ac911e4828c7c46817ec6ed9bf181d"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/stop.ts": {
+    "mtime": 1775700813.1707506,
+    "hash": "0019157d3c7279af67653629e5a56ca4"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/goals.ts": {
+    "mtime": 1776439545.685115,
+    "hash": "5c29e584bd472ea56b78818e064baa07"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/index.ts": {
+    "mtime": 1779128744.9504728,
+    "hash": "ee0f1865c5c0ffd32418a46606df6df2"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/enable-agent.ts": {
+    "mtime": 1777078046.8412971,
+    "hash": "6abd8d3f556cc24a7ae55780fa137eb5"
+  },
+  "/Users/swilson/projects/cortextos/src/cli/update.ts": {
+    "mtime": 1779128744.9506671,
+    "hash": "54ee7ac2f7fc8b6ea23b2c7b5ed07938"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/agent-process.ts": {
+    "mtime": 1782418205.197896,
+    "hash": "c2fc5f24a4af66f1e900b2c34f238433"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/worker-process.ts": {
+    "mtime": 1779128744.9517448,
+    "hash": "002921ccc55cc8b14fab4fec2ae8a151"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/cron-execution-log.ts": {
+    "mtime": 1778083415.9621475,
+    "hash": "86d77973e4798823fe9f5a2f6b1fe141"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/agent-manager.ts": {
+    "mtime": 1782689937.4570343,
+    "hash": "2f15d80abe34353dc73c5a429735e23b"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/cron-migration.ts": {
+    "mtime": 1778083415.9622214,
+    "hash": "081b97b766bc3e37f88886a29fa5e402"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/cron-scheduler.ts": {
+    "mtime": 1778083415.9623082,
+    "hash": "8e18e1ee65ffb7e0de7d90e561522048"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/ipc-server.ts": {
+    "mtime": 1779128744.9513738,
+    "hash": "8260ca18ce680fb0af8a315020311d43"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/index.ts": {
+    "mtime": 1778083415.9624681,
+    "hash": "229a71d2175843543d1b6c3c272ebc71"
+  },
+  "/Users/swilson/projects/cortextos/src/daemon/fast-checker.ts": {
+    "mtime": 1781968688.0526357,
+    "hash": "e146583d52da846e06f378508689ff68"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-loop-detector.ts": {
+    "mtime": 1781273786.3644907,
+    "hash": "f845e2b35d3b5f91e891e306739c3bad"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-compact-telegram.ts": {
+    "mtime": 1776439545.6858363,
+    "hash": "83c7b032e2e8ba1db693823f7ed19ca0"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-ask-telegram.ts": {
+    "mtime": 1775382493.0841937,
+    "hash": "3f4334eafb981e142dbb2832802e0ec6"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-permission-telegram.ts": {
+    "mtime": 1775382493.0843976,
+    "hash": "bba6fdff78a4a13699006f41c74c4587"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-crash-alert.ts": {
+    "mtime": 1781273786.3643765,
+    "hash": "f19d985d94129306b96127f1dd64a4f6"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-extract-facts.ts": {
+    "mtime": 1776439545.686382,
+    "hash": "de84d42160aaa5fdb0b341532f92fe5a"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-planmode-telegram.ts": {
+    "mtime": 1775382493.0844648,
+    "hash": "de3f873d72800248dd34f902c80f2ad2"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-context-status.ts": {
+    "mtime": 1776727291.9326477,
+    "hash": "4335fb4bfe9d40ab10aeb6405fff4978"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/index.ts": {
+    "mtime": 1781273786.364797,
+    "hash": "90566da47e51fe16590f2ec1c5088621"
+  },
+  "/Users/swilson/projects/cortextos/src/hooks/hook-idle-flag.ts": {
+    "mtime": 1775556829.26407,
+    "hash": "8f652481d641bfbeec8dca22851153ea"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/describe-image.ts": {
+    "mtime": 1782689937.4814398,
+    "hash": "960689706a33b2c0af3655aa6ca11d3a"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/transcribe.ts": {
+    "mtime": 1781273786.3666975,
+    "hash": "55c927889031878f04cf471b8e5b4156"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/poller.ts": {
+    "mtime": 1781968688.0539544,
+    "hash": "853b126afa1a4991bb5b32c91305f3da"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/api.ts": {
+    "mtime": 1781968688.053395,
+    "hash": "b09ec80af892c030acc0e2ca33ac873e"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/index.ts": {
+    "mtime": 1778367102.040242,
+    "hash": "8a0d4c61e7d7ef74a54bfd9d78d123da"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/media.ts": {
+    "mtime": 1781968688.0537307,
+    "hash": "dd5e9c1932b8189adc3fab4f0aadf5a3"
+  },
+  "/Users/swilson/projects/cortextos/src/telegram/logging.ts": {
+    "mtime": 1778367102.0405474,
+    "hash": "d48fc96eba9a096cb374d2298afca71f"
+  }
+}

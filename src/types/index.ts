@@ -195,12 +195,25 @@ export interface AgentConfig {
    */
   codex_context_cap?: number;
   /**
+   * Fallback context window cap (tokens) for opencode agents when the OpenCode
+   * model cache does not expose a context limit. Only applies to runtime:
+   * 'opencode'.
+   */
+  opencode_context_cap?: number;
+  /**
    * Agent runtime. Defaults to 'claude-code' when absent.
    * 'hermes' selects the HermesPTY spawn path (Python persistent REPL,
    * NousResearch/hermes-agent) with Hermes-specific bootstrap, session
    * continuity, and exit handling.
+   * 'opencode' selects the OpencodePTY spawn path, a native PTY terminal
+   * runtime for opencode.ai's OpenCode CLI.
    */
-  runtime?: 'claude-code' | 'hermes' | 'codex-app-server';
+  runtime?: 'claude-code' | 'hermes' | 'codex-app-server' | 'opencode';
+  /**
+   * Optional OpenCode agent name to pass as `opencode --agent <name>`.
+   * Only applies to runtime: 'opencode'.
+   */
+  opencode_agent?: string;
   /**
    * Whether this agent runs a Telegram poller. Defaults to true when absent
    * (preserves existing behaviour). Set to false on specialist agents that
@@ -468,14 +481,6 @@ export interface OrgContext {
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
-  /**
-   * An edit to a previously sent message. Telegram emits this as a separate
-   * update type from `message`; the bot must opt in via `allowed_updates`
-   * to receive it. Same shape as `message`. Handlers are registered
-   * separately on the poller (see `TelegramPoller.onEditedMessage`) so
-   * existing message handlers do not double-fire on edits.
-   */
-  edited_message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
   message_reaction?: TelegramMessageReaction;
 }

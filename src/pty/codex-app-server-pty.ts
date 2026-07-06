@@ -2,14 +2,13 @@ import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } f
 import { join } from 'path';
 import { homedir } from 'os';
 import { randomBytes } from 'crypto';
-import { spawn as spawnChild, type ChildProcessWithoutNullStreams } from 'child_process';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir, atomicWriteSync } from '../utils/atomic.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
-import { StdioJsonRpcClient, type JsonRpcResponse } from '../utils/stdio-jsonrpc-client.js';
+import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
 
 interface IPty {
   pid: number;
@@ -97,6 +96,7 @@ const LOCAL_SLASH_COMMANDS = new Set(['goal']);
 export class CodexAppServerPTY {
   private _alive = false;
   private _executing = false;
+  private _activeTurnId: string | null = null;
   private _writeBuffer = '';
   private _turnQueue: unknown[][] = [];
   private _turnCompletion: {
@@ -106,8 +106,7 @@ export class CodexAppServerPTY {
   } | null = null;
   private _spawnFn: SpawnFn | null = null;
   private _appServerPty: IPty | null = null;
-  private _childProcess: ChildProcessWithoutNullStreams | null = null;
-  private _rpc: StdioJsonRpcClient | null = null;
+  private _rpc: WsUnixJsonRpcClient | null = null;
   private _onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private _outputBuffer: OutputBuffer;
   private _env: CtxEnv;
@@ -184,36 +183,24 @@ export class CodexAppServerPTY {
 
   kill(): void {
     this._alive = false;
+    this._activeTurnId = null;
     this._turnQueue = [];
     this.rejectTurnCompletion(new Error('Codex app-server stopped'));
     if (this._rpc) {
       this._rpc.close();
       this._rpc = null;
     }
-    if (this._childProcess) {
-      try {
-        this._childProcess.kill();
-      } catch {
-        // Ignore shutdown errors.
-      }
-      // Do NOT null _childProcess here — let the real 'exit' event fire
-      // _onExitHandler. Setting it null synchronously would mask the real
-      // exit code from the daemon and trigger spurious crash-recovery loops.
-    }
     if (this._appServerPty) {
       try {
         this._appServerPty.kill();
       } catch {
-        // Ignore shutdown errors (legacy PTY path).
+        // Ignore shutdown errors.
       }
       this._appServerPty = null;
     }
     this.removeSocket();
-    // Do NOT synthetically fire _onExitHandler here. The real exit event
-    // from child.on('exit') (or the legacy pty.onExit) is the authoritative
-    // signal. Synthetic 0-exit calls confused the daemon's handleExit into
-    // treating spawn failures as graceful exits, triggering BUG-011 restart
-    // cascades. Leave _onExitHandler in place so the real exit can call it.
+    this._onExitHandler?.(0, undefined);
+    this._onExitHandler = null;
   }
 
   isAlive(): boolean {
@@ -221,7 +208,7 @@ export class CodexAppServerPTY {
   }
 
   getPid(): number | null {
-    return this._childProcess?.pid ?? this._appServerPty?.pid ?? null;
+    return this._appServerPty?.pid ?? null;
   }
 
   onExit(handler: (exitCode: number, signal?: number) => void): void {
@@ -428,56 +415,40 @@ export class CodexAppServerPTY {
 
   private startAppServer(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      // Codex 0.125's stdio:// transport is plain newline-delimited JSON-RPC.
-      // The unix:// transport is NOT WebSocket-framed (a misread in earlier
-      // versions of this file that caused silent handshake failures). Use
-      // child_process.spawn directly — no PTY needed since codex doesn't
-      // require a TTY for app-server mode and PTY framing adds escape codes
-      // that interleave with the JSON-RPC stream.
-      const child = spawnChild('codex', [
+      if (!this._spawnFn) {
+        const nodePty = require('node-pty');
+        this._spawnFn = nodePty.spawn;
+      }
+
+      const spawnFn = this._spawnFn!;
+      const pty = spawnFn('codex', [
         'app-server',
-        '--listen', 'stdio://',
+        '--enable', 'goals',
+        '--listen', this._socketListenArg,
       ], {
-        cwd: this._cwd,
+        name: 'xterm-256color',
+        cols: 200,
+        rows: 50,
+        cwd: this._socketCwd,
         env: this.buildEnv(),
-        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      this._childProcess = child;
-
-      child.stderr.setEncoding('utf-8');
-      child.stderr.on('data', (data: string) => {
+      this._appServerPty = pty;
+      pty.onData((data) => {
         this._outputBuffer.push(data);
         if (data.includes('Error:')) {
-          // stderr 'Error:' lines are usually fatal — reject the spawn promise
-          // only if we haven't transitioned to "alive" yet.
-          if (!this._alive) {
-            reject(new Error(data.trim()));
-          }
+          reject(new Error(data.trim()));
         }
       });
-
-      child.on('error', (err) => {
-        if (this._childProcess !== child) return;
-        this._childProcess = null;
-        this._alive = false;
-        this.rejectTurnCompletion(err);
-        this._onExitHandler?.(1, undefined);
-        reject(err);
-      });
-
-      child.on('exit', (exitCode, signal) => {
-        if (this._childProcess !== child) return;
-        this._childProcess = null;
+      pty.onExit(({ exitCode, signal }) => {
+        if (this._appServerPty !== pty) return;
+        this._appServerPty = null;
         this._alive = false;
         this.rejectTurnCompletion(new Error('Codex app-server exited'));
-        this._onExitHandler?.(exitCode ?? 0, signal ? 1 : undefined);
+        this._onExitHandler?.(exitCode, signal);
       });
 
-      // Resolve immediately — the child is spawned. connectRpc() (called next
-      // in spawn()) will detect any real failure via the JSON-RPC initialize
-      // round-trip.
-      resolve();
+      this.waitForSocket().then(resolve, reject);
     });
   }
 
@@ -491,12 +462,9 @@ export class CodexAppServerPTY {
   }
 
   private async connectRpc(): Promise<void> {
-    if (!this._childProcess) {
-      throw new Error('cannot connect RPC: child process not spawned');
-    }
-    this._rpc = new StdioJsonRpcClient();
+    this._rpc = new WsUnixJsonRpcClient(this._socketPath);
     this._rpc.onMessage((message) => this.handleRpcMessage(message));
-    this._rpc.attach(this._childProcess);
+    await this._rpc.connect();
   }
 
   private async initializeRpc(): Promise<void> {
@@ -530,15 +498,14 @@ export class CodexAppServerPTY {
           this._outputBuffer.push(`[codex-app-server] persisted resume failed: ${err}\n`);
         }
       }
-    }
 
-    if (mode === 'continue') {
       const latest = await this.findLatestThreadForCwd();
       if (latest) {
         const resumed = await this.request<ThreadResponse>('thread/resume', {
           threadId: latest,
           cwd: this._cwd,
           ...THREAD_PERMISSION_OVERRIDES,
+          config: { features: { goals: true } },
           excludeTurns: true,
           persistExtendedHistory: true,
         });
@@ -550,6 +517,7 @@ export class CodexAppServerPTY {
     const started = await this.request<ThreadResponse>('thread/start', {
       cwd: this._cwd,
       ...THREAD_PERMISSION_OVERRIDES,
+      config: { features: { goals: true } },
       sessionStartSource: 'startup',
       experimentalRawEvents: false,
       persistExtendedHistory: true,
@@ -568,7 +536,46 @@ export class CodexAppServerPTY {
     return response.result?.data?.[0]?.id || null;
   }
 
+  /**
+   * Mid-turn parity with the Claude PTY-injection path: while a turn is
+   * executing, try `turn/steer` so the message lands in the active turn at the
+   * next model step instead of waiting for turn/completed. Any steer rejection
+   * (ExpectedTurnMismatch = turn just ended, ActiveTurnNotSteerable =
+   * review/compact, NoActiveTurn, transport error) falls back to the queue, so
+   * no message is ever lost. CODEX_STEER_DISABLED=1 reverts to pure queueing.
+   */
   private queueTurn(input: unknown[]): void {
+    if (this._executing && this._activeTurnId && process.env.CODEX_STEER_DISABLED !== '1') {
+      this.steerActiveTurn(input).catch((err) => {
+        this._outputBuffer.push(`[codex-app-server] steer path failed: ${err}\n`);
+      });
+      return;
+    }
+    this.enqueueTurn(input);
+  }
+
+  private async steerActiveTurn(input: unknown[]): Promise<void> {
+    const expectedTurnId = this._activeTurnId;
+    if (!this._threadId || !expectedTurnId) {
+      this.enqueueTurn(input);
+      return;
+    }
+    try {
+      await this.request('turn/steer', {
+        threadId: this._threadId,
+        expectedTurnId,
+        input,
+      });
+      this._outputBuffer.push(`[codex-app-server] steered active turn ${expectedTurnId}\n`);
+    } catch (err) {
+      // Do not retry steer here: the rejection may be a non-steerable turn
+      // (review/compact). Queueing guarantees delivery right after it ends.
+      this._outputBuffer.push(`[codex-app-server] steer rejected, queueing: ${err}\n`);
+      this.enqueueTurn(input);
+    }
+  }
+
+  private enqueueTurn(input: unknown[]): void {
     this._turnQueue.push(input);
     if (!this._executing) {
       this.drainQueue().catch((err) => {
@@ -693,10 +700,14 @@ export class CodexAppServerPTY {
         }
         break;
       case 'turn/started':
+        if (isRecord(params.turn) && typeof params.turn.id === 'string') {
+          this._activeTurnId = params.turn.id;
+        }
         this.maybeFireTyping();
         this._outputBuffer.push('[codex-app-server] turn started\n');
         break;
       case 'turn/completed':
+        this._activeTurnId = null;
         this.writeIdleFlag();
         this._outputBuffer.push('[codex-app-server] turn completed\n');
         this.resolveTurnCompletion();
@@ -726,6 +737,7 @@ export class CodexAppServerPTY {
         this._outputBuffer.push('[goal] cleared\n');
         break;
       case 'error':
+        this._activeTurnId = null;
         this._outputBuffer.push(`[codex-app-server] error: ${JSON.stringify(params)}\n`);
         this.rejectTurnCompletion(new Error(JSON.stringify(params)));
         break;
@@ -817,34 +829,38 @@ export class CodexAppServerPTY {
    * monitor. Writes atomically; failures are non-fatal (observability only).
    *
    * Mapping (per codex schema ThreadTokenUsageUpdatedNotification):
-   *   - used_percentage = total.totalTokens / cap * 100  (clamped to [0, 100])
+   *   - used_percentage = last.totalTokens / cap * 100  (clamped to [0, 100])
    *   - context_window_size = modelContextWindow ?? config.codex_context_cap ?? 256000
-   *   - exceeds_200k_tokens = total.totalTokens > 200000
-   *   - current_usage.{input,output,cache_read} from total.{input,output,cachedInput}Tokens
+   *   - exceeds_200k_tokens = last.totalTokens > 200000
+   *   - current_usage.{input,output,cache_read} from last.{input,output,cachedInput}Tokens
    *   - session_id = current threadId
+   *
+   * `total` is lifetime cumulative across the app-server thread and can grow far
+   * beyond the active model window. Context handoff must use the current window
+   * occupancy (`last`) so long-lived threads do not report false 100%.
    */
   private writeContextStatus(params: Record<string, unknown>): void {
     const tokenUsage = isRecord(params.tokenUsage) ? params.tokenUsage : null;
     if (!tokenUsage) return;
-    const total = isRecord(tokenUsage.total) ? tokenUsage.total : null;
-    if (!total) return;
-    const totalTokens = typeof total.totalTokens === 'number' ? total.totalTokens : null;
-    if (totalTokens === null) return;
+    const current = isRecord(tokenUsage.last) ? tokenUsage.last : null;
+    const currentTokens = current && typeof current.totalTokens === 'number' ? current.totalTokens : null;
 
     const modelContextWindow = typeof tokenUsage.modelContextWindow === 'number'
       ? tokenUsage.modelContextWindow
       : null;
     const cap = modelContextWindow ?? this._config.codex_context_cap ?? 256000;
-    const usedPct = cap > 0 ? Math.min(100, (totalTokens / cap) * 100) : null;
+    const usedPct = cap > 0 && currentTokens !== null
+      ? Math.min(100, (currentTokens / cap) * 100)
+      : null;
 
-    const inputTokens = typeof total.inputTokens === 'number' ? total.inputTokens : 0;
-    const outputTokens = typeof total.outputTokens === 'number' ? total.outputTokens : 0;
-    const cachedInputTokens = typeof total.cachedInputTokens === 'number' ? total.cachedInputTokens : 0;
+    const inputTokens = current && typeof current.inputTokens === 'number' ? current.inputTokens : 0;
+    const outputTokens = current && typeof current.outputTokens === 'number' ? current.outputTokens : 0;
+    const cachedInputTokens = current && typeof current.cachedInputTokens === 'number' ? current.cachedInputTokens : 0;
 
     const payload = JSON.stringify({
       used_percentage: usedPct,
       context_window_size: cap,
-      exceeds_200k_tokens: totalTokens > 200000,
+      exceeds_200k_tokens: currentTokens !== null ? currentTokens > 200000 : false,
       current_usage: {
         input_tokens: inputTokens,
         output_tokens: outputTokens,
@@ -939,31 +955,14 @@ export class CodexAppServerPTY {
   }
 
   private cleanupSpawnAttempt(): void {
-    const child = this._childProcess;
-    this._childProcess = null;
-    if (child) {
-      try {
-        child.kill();
-      } catch {
-        // Ignore failed attempt cleanup errors.
-      }
-    }
     const pty = this._appServerPty;
     this._appServerPty = null;
     if (pty) {
       try {
         pty.kill();
       } catch {
-        // Ignore failed attempt cleanup errors (legacy PTY path).
+        // Ignore failed attempt cleanup errors.
       }
-    }
-    if (this._rpc) {
-      try {
-        this._rpc.close();
-      } catch {
-        // Ignore RPC close errors on cleanup.
-      }
-      this._rpc = null;
     }
     this.removeSocket();
   }
