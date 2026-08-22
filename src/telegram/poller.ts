@@ -10,6 +10,45 @@ export type CallbackHandler = (query: TelegramCallbackQuery) => void;
 export type ReactionHandler = (reaction: TelegramMessageReaction) => void;
 
 /**
+ * Ceiling (ms) on an honored Telegram 429 `retry after N` hint.
+ *
+ * The retry_after hint is honored directly and is deliberately NOT subject to the
+ * 30s exponential `capMs` — a real Telegram flood-control wait can legitimately
+ * exceed 30s, and truncating it to 30s would ignore the server's instruction and
+ * risk a tighter flood ban. But the hint must still be bounded: an uncapped
+ * honor path lets a hostile or buggy `retry after 3600` sleep the poller ~1h and
+ * freeze the agent's Telegram lifeline.
+ *
+ * 5 minutes is a generous ceiling. Real Telegram flood-control waits run from
+ * seconds to at most low minutes, so a legitimate hint is honored unchanged,
+ * while an absurd value is clamped so the poller resumes within minutes rather
+ * than being frozen for an hour.
+ */
+export const RETRY_AFTER_CEILING_MS = 300_000;
+
+/**
+ * Compute the base backoff delay (in ms) after a transient poll failure.
+ *
+ * Pure and jitter-free — the caller adds any jitter and owns 409 handling.
+ *
+ * @param message The error message from the failed getUpdates call.
+ * @param attempt Consecutive-transient-error count (>=1).
+ * @param baseMs Base delay for the exponential curve (the normal poll interval).
+ * @param capMs Maximum backoff delay.
+ * @returns Honors a `retry after N` hint from a Telegram 429 (short-circuits the
+ *   curve), clamped to {@link RETRY_AFTER_CEILING_MS}; otherwise an
+ *   exponential-with-cap delay: min(capMs, baseMs * 2^(attempt-1)).
+ */
+export function computePollBackoffMs(message: string, attempt: number, baseMs: number, capMs: number): number {
+  const retryMatch = message.match(/retry after (\d+)/i);
+  if (retryMatch) {
+    const honored = Math.max(1, parseInt(retryMatch[1], 10)) * 1000;
+    return Math.min(RETRY_AFTER_CEILING_MS, honored);
+  }
+  return Math.min(capMs, baseMs * 2 ** (attempt - 1));
+}
+
+/**
  * Telegram polling loop. Replaces the Telegram portion of fast-checker.sh.
  * Polls getUpdates every 1 second and routes messages/callbacks to handlers.
  */
@@ -24,10 +63,8 @@ export class TelegramPoller {
   private callbackHandlers: CallbackHandler[] = [];
   private reactionHandlers: ReactionHandler[] = [];
   private pollInterval: number;
-  // Telegram-aware backoff: when a poll fails with 429 Too Many Requests, 5xx,
-  // or timeout, the loop waits this many ms before next poll (instead of the
-  // base pollInterval). Reset to 0 on the next successful poll. See start().
-  private currentBackoffMs: number = 0;
+  private consecutiveErrors = 0;
+  private readonly backoffCapMs = 30_000;
   /**
    * Why the poll loop last exited. Read by AgentManager's poller-supervisor
    * (#459 supervision-gap fix) to decide whether to restart:
@@ -54,7 +91,7 @@ export class TelegramPoller {
    *   write to `.telegram-offset` and lose track of which bot each
    *   offset belonged to.
    */
-  constructor(api: TelegramAPI, stateDir: string, pollInterval: number = 3000, offsetFileSuffix?: string) {
+  constructor(api: TelegramAPI, stateDir: string, pollInterval: number = 1000, offsetFileSuffix?: string) {
     this.api = api;
     this.stateDir = stateDir;
     this.pollInterval = pollInterval;
@@ -111,11 +148,13 @@ export class TelegramPoller {
   async start(): Promise<void> {
     this.running = true;
     this.lastExitReason = '';
+    this.consecutiveErrors = 0;
     while (this.running) {
       try {
         await this.pollOnce();
-        // Successful poll resets backoff to the configured base interval.
-        this.currentBackoffMs = 0;
+        // Success — clear the backoff counter and poll again at the normal interval.
+        this.consecutiveErrors = 0;
+        await sleep(this.pollInterval);
       } catch (err) {
         if (!this.running) {
           this.lastExitReason = 'stopped-externally';
@@ -131,27 +170,14 @@ export class TelegramPoller {
           this.running = false;
           return;
         }
-        // Other errors are transient — log and continue polling.
-        console.error('[telegram-poller] Poll error:', err);
-        // Telegram-aware backoff: when getUpdates is rate-limited (429 Too Many
-        // Requests) or returns 5xx Bad Gateway/Service Unavailable, the API
-        // response includes a `retry_after` parameter in seconds. We honor it
-        // when present; otherwise we double the previous backoff (exponential),
-        // capped at 60s. This prevents tight error-spin loops from compounding
-        // the rate-limit problem they tripped.
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const retryMatch = errMsg.match(/retry after (\d+)/i);
-        if (retryMatch) {
-          this.currentBackoffMs = Math.min(parseInt(retryMatch[1], 10) * 1000, 60000);
-        } else if (/Too Many Requests|Bad Gateway|Service Unavailable|timed out/i.test(errMsg)) {
-          this.currentBackoffMs = Math.min(Math.max(this.currentBackoffMs * 2, this.pollInterval * 2), 60000);
-        } else {
-          // Non-rate-limit errors: don't pile on backoff, just sleep the base interval.
-          this.currentBackoffMs = 0;
-        }
+        // Other errors are transient — back off exponentially (honoring a 429
+        // retry_after hint) so a persistent failure does not hot-loop the API.
+        this.consecutiveErrors++;
+        const base = computePollBackoffMs(msg, this.consecutiveErrors, this.pollInterval, this.backoffCapMs);
+        const delay = base + Math.random() * this.pollInterval;
+        console.error(`[telegram-poller] Poll error (retry in ${Math.round(delay)}ms, attempt ${this.consecutiveErrors}):`, err);
+        await sleep(delay);
       }
-      const wait = this.currentBackoffMs > 0 ? this.currentBackoffMs : this.pollInterval;
-      await sleep(wait);
     }
   }
 
