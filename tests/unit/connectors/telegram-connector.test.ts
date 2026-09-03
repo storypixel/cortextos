@@ -25,12 +25,23 @@ function installFetchMock(factory: MockResponseFactory) {
 
 describe('TelegramConnector', () => {
   const originalFetch = globalThis.fetch;
+  let originalUnpooledHttps: string | undefined;
 
   beforeEach(() => {
+    // The prod Telegram JSON transport defaults to a node:https path that the
+    // fetch mock below cannot intercept. Force it back onto pooled fetch via
+    // the seam prod already ships, restoring the prior value in afterEach.
+    originalUnpooledHttps = process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS;
+    process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS = '0';
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    if (originalUnpooledHttps === undefined) {
+      delete process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS;
+    } else {
+      process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS = originalUnpooledHttps;
+    }
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
     vi.restoreAllMocks();

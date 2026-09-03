@@ -22,14 +22,26 @@ describe('TelegramConnector reactions (integration with mock server)', () => {
   let connector: TelegramConnector;
   let stateDir: string;
   let received: NormalizedReactionPayload[];
+  let originalUnpooledHttps: string | undefined;
 
   beforeAll(async () => {
+    // The mock server speaks http://; the prod Telegram transport defaults to a
+    // node:https path that rejects http URLs (ERR_INVALID_PROTOCOL). Force it
+    // back onto pooled fetch via the seam prod already ships, restoring the
+    // prior value in afterAll so it cannot leak into sibling suites.
+    originalUnpooledHttps = process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS;
+    process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS = '0';
     server = new MockTelegramServer(39190);
     await server.start();
   });
 
   afterAll(async () => {
     await server.stop();
+    if (originalUnpooledHttps === undefined) {
+      delete process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS;
+    } else {
+      process.env.CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS = originalUnpooledHttps;
+    }
   });
 
   beforeEach(async () => {
