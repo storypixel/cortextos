@@ -117,8 +117,8 @@ describe('CodexAppServerPTY socket path policy', () => {
 });
 
 describe('CodexAppServerPTY command mapping', () => {
-  function makeReadyPty() {
-    const pty = new CodexAppServerPTY(mockEnv, {});
+  function makeReadyPty(config: Record<string, unknown> = {}) {
+    const pty = new CodexAppServerPTY(mockEnv, config as any);
     (pty as unknown as { _alive: boolean })._alive = true;
     (pty as unknown as { _threadId: string })._threadId = 'thread-1';
     (pty as unknown as { _rpc: { request: typeof requestMock; respondError: typeof respondErrorMock } })._rpc = {
@@ -127,6 +127,25 @@ describe('CodexAppServerPTY command mapping', () => {
     };
     return pty;
   }
+
+  it('applies the configured model and reasoning effort to every turn', async () => {
+    requestMock.mockResolvedValueOnce({ result: {} });
+    const pty = makeReadyPty({ model: 'gpt-6-astra', reasoning_effort: 'medium' });
+
+    pty.write('hello');
+    pty.write('\r');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(requestMock).toHaveBeenCalledWith('turn/start', {
+      threadId: 'thread-1',
+      input: [{ type: 'text', text: 'hello', text_elements: [] }],
+      model: 'gpt-6-astra',
+      effort: 'medium',
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+  });
 
   it('maps /goal to thread/goal/get', async () => {
     requestMock.mockResolvedValue({ result: { goal: null } });

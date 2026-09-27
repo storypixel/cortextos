@@ -1,6 +1,6 @@
 ---
 name: dynamic-dev-workflow
-description: Use this skill for a large or multi-file coding task too big for one pass — refactors, migrations, multi-module features, broad sweeping edits. It runs the "dynamic dev" pattern (Sonnet explores, Fable 5 plans and decomposes, parallel implementers each work in an isolated git worktree, Opus 4.8 integrates and reviews) via a ready-made Workflow script. Aimed at dev/orchestrator agents (e.g. zerocool, acid-burn). Not for one-file tweaks or tightly-coupled changes that cannot be split.
+description: Use this skill for a large or multi-file coding task too big for one pass — refactors, migrations, multi-module features, broad sweeping edits. It runs the "dynamic dev" pattern (Sonnet explores, Fable 5 plans and decomposes, parallel implementers each work in an isolated git worktree, Opus 5 integrates and reviews) via a ready-made Workflow script. Aimed at dev/orchestrator agents (e.g. zerocool, acid-burn). Not for one-file tweaks or tightly-coupled changes that cannot be split.
 ---
 
 # Dynamic Dev Workflow
@@ -10,7 +10,7 @@ A ready-to-run Claude Code Workflow that fans a big coding task out across model
 - **Explore** (Sonnet 5) — maps the relevant code, writes nothing.
 - **Plan** (Fable 5) — decomposes the task into independent, parallel-safe work items (disjoint files).
 - **Implement** (parallel) — one implementer per item, each in its own git worktree so they never conflict.
-- **Integrate + Review** (Opus 4.8) — merges the worktree branches and reviews against each item's acceptance criteria.
+- **Integrate + Review** (Opus 5) — merges the worktree branches and reviews against each item's acceptance criteria.
 
 The value is not "many agents." It is a strong planner on top, isolated parallel implementers in the middle, and a review gate at the bottom — an auditable loop you can rerun and inspect.
 

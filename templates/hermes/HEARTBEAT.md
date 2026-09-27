@@ -61,6 +61,21 @@ cat >> "memory/$TODAY.md" << MEMORY
 - Inbox: <N messages processed>
 - Next action: <what you will do next>
 MEMORY
+
+# VERIFY THE SIDE EFFECT — a step whose product is a FILE WRITE has no deliverable in
+# its terminal output, so an error there is invisible BY DESIGN, not by inattention.
+# That is how `date -u +%H:%M UTC` printed "illegal time format" on every heartbeat in
+# 7 agent files for weeks and nobody reported it. (california-tom, 2026-07-27)
+# FORMAT-INDEPENDENT ON PURPOSE. A first version grepped for the literal heading
+# "Heartbeat Update" and would have FATAL'd on klavon — which writes "## Heartbeat 00:26 UTC"
+# and is demonstrably healthy (7 heavy passes tonight). A check tuned to the author's own
+# file format is how you produce a confident wrong answer about other agents at once.
+# So: verify the WRITE LANDED, not that it matches anyone's template.
+if [ -s "$MEMORY_DIR/$TODAY.md" ] && [ -n "$(/usr/bin/find "$MEMORY_DIR/$TODAY.md" -mmin -2 2>/dev/null)" ]; then
+  echo "step 5 OK: $TODAY.md written just now"
+else
+  echo "FATAL: step 5 did not write to $MEMORY_DIR/$TODAY.md — the heartbeat did not land"
+fi
 ```
 
 ## Step 6: Re-index memory to KB

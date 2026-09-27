@@ -120,6 +120,28 @@ describe('AgentProcess codex-app-server runtime', () => {
     expect(ap.getStatus().pid).toBe(24680);
   });
 
+  it('uses the cold-start bootstrap only without a handoff, and a lean handoff prompt when restarting from a handoff', async () => {
+    const cold = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
+    await cold.start();
+    const coldPrompt = mockCodexAppServerPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(coldPrompt).toContain('Read AGENTS.md and all bootstrap files listed there.');
+
+    const handoffDocPath = '/tmp/handoff-doc.md';
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      typeof path === 'string' && (path.endsWith('.handoff-doc-path') || path === handoffDocPath),
+    );
+    fsMocks.readFileSync.mockReturnValue(handoffDocPath);
+
+    const handoff = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
+    handoff.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined) } as any, '12345');
+    await handoff.start();
+    const handoffPrompt = mockCodexAppServerPty.spawn.mock.calls.at(-1)?.[1] ?? '';
+    expect(handoffPrompt).toContain(`Read the handoff document at ${handoffDocPath}`);
+    expect(handoffPrompt).not.toContain('Read AGENTS.md and all bootstrap files listed there.');
+    expect(handoffPrompt).toContain('do NOT call CronCreate or CronList for cron restoration.');
+    expect(handoffPrompt).toContain('VERY FIRST tool call MUST be a Bash call running');
+  });
+
   it('wires Telegram handle to CodexAppServerPTY before start', async () => {
     const ap = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined) };

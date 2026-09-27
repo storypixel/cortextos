@@ -1,12 +1,12 @@
 export const meta = {
   name: 'dynamic-dev-task',
   description:
-    'Dynamic dev workflow (the Fable-5 pattern): Sonnet explores, Fable 5 plans + decomposes into parallel-safe work items, one implementer per item runs in its own git worktree, Opus 4.8 integrates + reviews. Pass the task via args (a string, or {task, maxItems}).',
+    'Dynamic dev workflow (the Fable-5 pattern): Sonnet explores, Fable 5 plans + decomposes into parallel-safe work items, one implementer per item runs in its own git worktree, Opus 5 integrates + reviews. Pass the task via args (a string, or {task, maxItems}).',
   phases: [
     { title: 'Explore', detail: 'Sonnet 5 maps the relevant code (writes nothing)', model: 'sonnet' },
     { title: 'Plan', detail: 'Fable 5 decomposes into independent, disjoint-file work items', model: 'fable' },
     { title: 'Implement', detail: 'one implementer per item, each in an isolated git worktree' },
-    { title: 'Integrate + Review', detail: 'Opus 4.8 merges the worktrees and reviews vs acceptance', model: 'opus' },
+    { title: 'Integrate + Review', detail: 'Opus 5 merges the worktrees and reviews vs acceptance', model: 'opus' },
   ],
 }
 

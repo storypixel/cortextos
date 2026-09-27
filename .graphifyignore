@@ -1,0 +1,18 @@
+# This project maintains a code-only Graphify graph. Keep full builds,
+# incremental updates, and git-hook rebuilds on the same corpus.
+*.gif
+*.html
+*.jpeg
+*.jpg
+*.md
+*.mdx
+*.pdf
+*.png
+*.qmd
+*.rst
+*.skill
+*.svg
+*.txt
+*.webp
+*.yaml
+*.yml

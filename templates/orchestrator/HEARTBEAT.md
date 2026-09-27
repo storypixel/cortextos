@@ -95,16 +95,43 @@ Full reference: `.claude/skills/memory/SKILL.md`
 ```bash
 TODAY=$(date -u +%Y-%m-%d)
 LOCAL_TIME=$(date +'%-I:%M %p %Z' 2>/dev/null || date)
+# MAKE THE STEP FAIL, DO NOT MAKE A LATER CHECK DETECT (california-tom, 2026-07-27).
+# A failing $(...) INSIDE a heredoc still appends the block: the substitution yields "",
+# the write succeeds, mtime updates. So the freshness check below passes on a write that
+# produced garbage — it verifies that SOMETHING was written, not that it was CORRECT, and
+# the motivating bug (`date -u +%H:%M UTC` -> "illegal time format") is entirely the second
+# kind. Hoisting the value out and testing it CONSUMES it at the moment it is produced.
+UTC_TS=$(date -u +'%H:%M UTC') || UTC_TS=""
+# PREVENT, do not DESCRIBE. `echo FATAL` does NOT abort — the heredoc runs regardless and
+# appends the malformed entry the guard exists to stop. And >&2, because stdout is "a stream
+# nobody treats as a signal" — the exact diagnosis of the original bug, which would otherwise
+# describe the WARNING about it. (california-tom, 2026-07-27)
+[ -n "$UTC_TS" ] || { echo "FATAL: step 5 timestamp empty, skipping malformed write" >&2; exit 1; }
 MEMORY_DIR="$(pwd)/memory"
 mkdir -p "$MEMORY_DIR"
 cat >> "$MEMORY_DIR/$TODAY.md" << MEMORY
 
-## Heartbeat Update - $(date -u +'%H:%M UTC') / $LOCAL_TIME
+## Heartbeat Update - $UTC_TS / $LOCAL_TIME
 - WORKING ON: <task_id or "none">
 - Status: <healthy/working/blocked>
 - Inbox: <N messages processed>
 - Next action: <what you will do next>
 MEMORY
+
+# VERIFY THE SIDE EFFECT — a step whose product is a FILE WRITE has no deliverable in
+# its terminal output, so an error there is invisible BY DESIGN, not by inattention.
+# That is how `date -u +%H:%M UTC` printed "illegal time format" on every heartbeat in
+# 7 agent files for weeks and nobody reported it. (california-tom, 2026-07-27)
+# FORMAT-INDEPENDENT ON PURPOSE. A first version grepped for the literal heading
+# "Heartbeat Update" and would have FATAL'd on klavon — which writes "## Heartbeat 00:26 UTC"
+# and is demonstrably healthy (7 heavy passes tonight). A check tuned to the author's own
+# file format is how you produce a confident wrong answer about other agents at once.
+# So: verify the WRITE LANDED, not that it matches anyone's template.
+if [ -s "$MEMORY_DIR/$TODAY.md" ] && [ -n "$(/usr/bin/find "$MEMORY_DIR/$TODAY.md" -mmin -2 2>/dev/null)" ]; then
+  echo "step 5 OK: $TODAY.md written just now"
+else
+  echo "FATAL: step 5 did not write to $MEMORY_DIR/$TODAY.md — the heartbeat did not land"
+fi
 ```
 
 ## Step 6: Check org goals state

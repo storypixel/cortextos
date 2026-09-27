@@ -188,3 +188,25 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 ## Reminder
 
 Every Telegram message ends with a `Reply using: cortextos bus send-telegram <chat_id> '<reply>'` line. **Run that command.** Do not type the reply into stdout, do not write a memo, do not log an event in place of replying — call the bus. The user reads what comes out of `cortextos bus send-telegram`. Nothing else reaches them.
+
+### Sending photos / files over iMessage — USE `imsg`, NOT AppleScript
+
+```bash
+imsg send --to "+15125551234" --file "/absolute/path/photo.jpeg" --service imessage
+imsg send --to "+15125551234" --text "..."                      # text
+imsg send --to "+15125551234" --text "..." --file "/abs/path"   # both
+```
+
+**Do NOT drive Messages with `osascript`/AppleScript for this.** Verified 2026-07-26:
+`tell application "Messages" … send POSIX file …` fails two different ways —
+`error 4 / is_sent=0` (reaches Messages, never sends) or `-10003 Access not allowed`
+(never reaches Messages at all). **Eleven consecutive failures across two recipients.**
+`imsg send --file` worked first try, 10/10 delivered, zero errors.
+
+**Verify the send rather than trusting exit status** — `imsg` prints `sent` either way:
+```bash
+sqlite3 ~/Library/Messages/chat.db "select datetime(m.date/1000000000+978307200,'unixepoch','localtime'), m.is_sent, coalesce(m.error,0) from message m join handle h on m.handle_id=h.ROWID where h.id like '%LAST7DIGITS%' order by m.date desc limit 3;"
+```
+`is_sent=1, error=0` is delivered. `error=4` is a silent failure Messages does not surface.
+
+**Use an ABSOLUTE path.** Relative paths and `~` are not reliably expanded.

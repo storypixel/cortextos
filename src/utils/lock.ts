@@ -1,5 +1,40 @@
-import { mkdirSync, rmdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, rmdirSync, writeFileSync, readFileSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
+
+/**
+ * How long a `.lock.d` may exist WITHOUT a readable PID before we treat it as
+ * orphaned rather than mid-acquire.
+ *
+ * The legitimate window between `mkdirSync` and `writeFileSync` is sub-
+ * millisecond, so a lock dir that has sat pid-less for 30s did not come from a
+ * live acquirer — it came from a process that died in that gap (or crashed
+ * mid-write, leaving a 0-byte pid). Without this, such a lock is PERMANENT:
+ * the pid-less/corrupt branches below return false forever and the stale-PID
+ * reclaim further down is unreachable because it needs a parseable PID.
+ */
+const ORPHAN_LOCK_MS = 30_000;
+
+/** Age in ms of the lock dir itself, or null if it cannot be stat'd. */
+function lockAgeMs(lockDir: string): number | null {
+  try {
+    return Date.now() - statSync(lockDir).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** Reclaim an orphaned lock dir. Returns true only if we now hold it. */
+function reclaimOrphanedLock(lockDir: string, pidFile: string): boolean {
+  try {
+    rmSync(lockDir, { recursive: true, force: true });
+    mkdirSync(lockDir);
+    writeFileSync(pidFile, String(process.pid));
+    return true;
+  } catch {
+    // Another process beat us to the steal — let the caller retry.
+    return false;
+  }
+}
 
 /**
  * Acquire a mutex lock using mkdir (atomic on all filesystems).
@@ -34,16 +69,28 @@ export function acquireLock(dir: string): boolean {
     try {
       storedPidRaw = readFileSync(pidFile, 'utf-8').trim();
     } catch {
-      // PID file not yet written.  Holder is between mkdir and writeFileSync.
-      // Refuse the lock — the caller's retry loop will try again.
+      // PID file not yet written.  Normally the holder is between mkdir and
+      // writeFileSync, so refuse and let the caller retry.  But that gap is
+      // sub-millisecond: if the dir has been pid-less for ORPHAN_LOCK_MS the
+      // acquirer died in the gap and nothing else can ever recover this lock
+      // (the stale-PID reclaim below needs a parseable PID), so reclaim it.
+      const age = lockAgeMs(lockDir);
+      if (age !== null && age > ORPHAN_LOCK_MS) {
+        return reclaimOrphanedLock(lockDir, pidFile);
+      }
       return false;
     }
 
     const storedPid = parseInt(storedPidRaw, 10);
     if (isNaN(storedPid) || storedPidRaw === '') {
-      // Corrupt PID file.  Don't steal — let caller retry; if it persists
-      // the holder is broken and a future stale-detection pass (process.kill
-      // check below, after the PID is written cleanly) will recover.
+      // Corrupt/empty PID file — same reasoning as the missing-PID case: a
+      // live holder writes a valid PID immediately, so past ORPHAN_LOCK_MS
+      // this is a crashed mid-write, not contention.  Reclaim rather than
+      // deadlock forever.
+      const age = lockAgeMs(lockDir);
+      if (age !== null && age > ORPHAN_LOCK_MS) {
+        return reclaimOrphanedLock(lockDir, pidFile);
+      }
       return false;
     }
 
@@ -54,15 +101,7 @@ export function acquireLock(dir: string): boolean {
       return false;
     } catch {
       // Process is dead - stale lock, remove and re-acquire atomically.
-      try {
-        rmSync(lockDir, { recursive: true, force: true });
-        mkdirSync(lockDir);
-        writeFileSync(pidFile, String(process.pid));
-        return true;
-      } catch {
-        // Another process beat us to the steal — let caller retry.
-        return false;
-      }
+      return reclaimOrphanedLock(lockDir, pidFile);
     }
   }
 }

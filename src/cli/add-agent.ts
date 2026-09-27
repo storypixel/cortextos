@@ -15,9 +15,70 @@ type RuntimeKind = typeof VALID_RUNTIMES[number];
 // variants exist (PR 11+).
 const NON_CODEX_TEMPLATES = ['orchestrator', 'analyst', 'm2c1-worker', 'hermes'] as const;
 
+/**
+ * Every agent template on disk, derived from the SAME artifact the guard uses:
+ * a directory under templates/ containing IDENTITY.md.
+ *
+ * WHY DERIVED AND NOT LISTED (california-tom, 2026-07-26): this file carried THREE
+ * lists of agent templates — the guard (artifact-derived), the guard's error message
+ * (hand-maintained), and the `--template` help string (hand-maintained). The help
+ * string had drifted to four entries, MISSING `agent-opencode` AND `hermes`, both
+ * real working templates. The flag that reaches hermes was undiscoverable from
+ * `--help` on the same night hermes was being repaired.
+ *
+ * Worse, the guard's own comment cited that help string as the advertised set —
+ * NAMING AS SOURCE OF TRUTH THE ONE LIST OF THE THREE THAT WAS STALE. Same shape as
+ * the rest of today's defects: two lineages diverge and the one designated
+ * authoritative is the out-of-date one.
+ *
+ * The behaviour was keyed on the artifact and the PROSE was left hand-maintained —
+ * the part that executes got fixed, the part that TELLS YOU got left. Deriving all
+ * three from one scan makes them agree by construction, with no list to maintain.
+ */
+function listAgentTemplates(projectRoot?: string): string[] {
+  const root = projectRoot || process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || process.cwd();
+  const roots = [
+    join(root, 'templates'),
+    join(root, 'node_modules', 'cortextos', 'templates'),
+    join(__dirname, '..', '..', 'templates'),
+  ];
+  for (const dir of roots) {
+    if (!existsSync(dir)) continue;
+    try {
+      const found = readdirSync(dir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && existsSync(join(dir, d.name, 'IDENTITY.md')))
+        .map(d => d.name)
+        .sort();
+      if (found.length > 0) return found;
+    } catch { /* unreadable templates dir — try the next candidate root */ }
+  }
+  return [];
+}
+
+// Computed once at load so --help and the guard cannot disagree.
+//
+// A ZERO-LENGTH SCAN IS NEVER A REAL STATE — templates/ always contains at least
+// `agent`. So an empty result means the SCAN is broken (wrong cwd, missing dir,
+// packaging move), not that there are no templates.
+//
+// This originally fell back to a hardcoded list, which is exactly the defect the
+// cron sweeper was fixed for earlier tonight: AN INSTRUMENT THAT EXAMINED ZERO
+// ITEMS MUST NOT BE ABLE TO EMIT A PLAUSIBLE ANSWER. A confident, well-formed,
+// possibly-wrong advertised set with nothing saying the scan failed is precisely
+// how the stale list this code replaced got born in the first place (roscoe).
+//
+// Not thrown at module load — this file is imported by the whole CLI, so a throw
+// here would take down `bus`, `start`, and everything else over a templates dir
+// that those commands never touch. The help string announces the failure instead,
+// and the ACTION re-scans with the properly-resolved projectRoot and exits 2.
+const AGENT_TEMPLATES = listAgentTemplates();
+const TEMPLATE_LIST = AGENT_TEMPLATES.length > 0
+  ? AGENT_TEMPLATES.join(', ')
+  : '⚠ template scan found none — run from the framework root';
+
 export const addAgentCommand = new Command('add-agent')
   .argument('<name>', 'Agent name')
-  .option('--template <type>', 'Agent template (orchestrator, analyst, agent, agent-codex)', 'agent')
+  .option('--template <type>', `Agent template (${TEMPLATE_LIST})`, 'agent')
   .option('--org <org>', 'Organization name')
   .option('--instance <id>', 'Instance ID', 'default')
   .option('--runtime <runtime>', `Agent runtime (${VALID_RUNTIMES.join(', ')})`, 'claude-code')
@@ -47,7 +108,7 @@ export const addAgentCommand = new Command('add-agent')
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       console.error(`Agent names must match /^[a-z0-9_-]+$/ (lowercase letters, numbers, underscores, hyphens).`);
-      console.error(`Examples of valid names: paul, sentinel, cortext-designer, m2c1-worker, agent_1`);
+      console.error(`Examples of valid names: paul, sentinel, cortext-designer, build_worker, agent_1`);
       process.exit(1);
     }
 
@@ -95,6 +156,50 @@ export const addAgentCommand = new Command('add-agent')
       process.exit(1);
     }
 
+    // Resolve the template BEFORE anything is created on disk, so a rejected
+    // template leaves no half-made agent directory behind.
+    const isCodexAppServer = options.runtime === 'codex-app-server';
+    const isOpencode = options.runtime === 'opencode';
+    const effectiveTemplate = isCodexAppServer && options.template === 'agent'
+      ? 'agent-codex'
+      : isOpencode && options.template === 'agent'
+        ? 'agent-opencode'
+        : options.template;
+    const templateDir = findTemplateDir(projectRoot, effectiveTemplate);
+
+    // Fatal-on-zero, with projectRoot properly resolved. An empty scan here means
+    // the install is broken; continuing would validate `--template` against nothing
+    // and let the IDENTITY.md guard pass by vacuum rather than by inspection.
+    const templatesOnDisk = listAgentTemplates(projectRoot);
+    if (templatesOnDisk.length === 0) {
+      console.error(`Error: found no agent templates under ${projectRoot}/templates (looked for directories containing IDENTITY.md).`);
+      console.error(`This is a broken install or a wrong working directory, not an empty template set — refusing to guess.`);
+      process.exit(2);
+    }
+
+    // A TEMPLATE WITH NO IDENTITY.md WAS NEVER MEANT TO BE AN AGENT (roscoe, 2026-07-26).
+    // Any directory under templates/ is reachable via --template, which is NOT the same
+    // as being a supported agent template — the advertised set is in the --template help
+    // string (itself derived from this same scan), and NON_CODEX_TEMPLATES is a
+    // codex-incompatibility list, not a registry.
+    //
+    // Without this, backfillMissingAgentFiles would happily give `--template m2c1-worker`
+    // a full spine and produce A BOOTABLE AGENT THAT IS MEANINGLESS: its three skills all
+    // assume it is a supervised ephemeral worker receiving a brain dump from a supervisor
+    // via `cortextos spawn-worker`. That is arguably worse than the 0/10 it produced
+    // before, because 0/10 fails loudly and a spined one boots and sits there.
+    //
+    // Keyed on IDENTITY.md in the SOURCE dir rather than on a maintained list, so new
+    // skill-bundle dirs are excluded automatically and nobody has to remember to add them.
+    if (templateDir && !existsSync(join(templateDir, 'IDENTITY.md'))) {
+      console.error(`Error: "${effectiveTemplate}" is not an agent template — it has no IDENTITY.md.`);
+      console.error(`It is a skill/scaffold bundle, not a persistent agent. Agent templates: ${TEMPLATE_LIST}.`);
+      if (effectiveTemplate === 'm2c1-worker') {
+        console.error(`For an M2C1 build session use \`cortextos spawn-worker\` — it is supervised by an existing agent, not created as one.`);
+      }
+      process.exit(1);
+    }
+
     console.log(`\nAdding agent: ${name}`);
     console.log(`  Template: ${options.template}`);
     console.log(`  Organization: ${org}`);
@@ -106,29 +211,23 @@ export const addAgentCommand = new Command('add-agent')
 
     // For codex-app-server, skills live under plugins/cortextos-agent-skills/skills
     // and are copied in by the template; .claude/skills is Claude-Code-only.
-    const isCodexAppServer = options.runtime === 'codex-app-server';
-    const isOpencode = options.runtime === 'opencode';
     if (!isCodexAppServer && !isOpencode) {
       mkdirSync(join(agentDir, '.claude', 'skills'), { recursive: true });
     }
 
-    // Resolve template name. Runtime-specific default agents get runtime-native
-    // bootstraps; explicit template choices are honored so orchestrator/analyst
-    // etc still work behind their current compatibility gates.
-    const effectiveTemplate = isCodexAppServer && options.template === 'agent'
-      ? 'agent-codex'
-      : isOpencode && options.template === 'agent'
-        ? 'agent-opencode'
-        : options.template;
-
-    // Copy template files
-    const templateDir = findTemplateDir(projectRoot, effectiveTemplate);
+    // Copy template files (templateDir/effectiveTemplate resolved above, pre-mkdir)
     if (templateDir) {
       copyTemplateFiles(templateDir, agentDir, name, org);
       console.log(`  Copied template files from ${effectiveTemplate}`);
+      // Partial templates must not yield a less complete agent than no template
+      // at all. Fills genuine absences only; never overwrites what a template ships.
+      const backfilled = backfillMissingAgentFiles(agentDir, name, org, options.template, options.runtime);
+      if (backfilled.length > 0) {
+        console.log(`  Backfilled ${backfilled.length} standard file(s) the ${effectiveTemplate} template omits: ${backfilled.join(', ')}`);
+      }
     } else {
       // Create minimal files
-      createMinimalAgent(agentDir, name, org, options.template);
+      createMinimalAgent(agentDir, name, org, options.template, options.runtime);
       console.log('  Created minimal agent files');
     }
 
@@ -490,22 +589,86 @@ function copyTemplateFiles(templateDir: string, agentDir: string, name: string, 
   }
 }
 
-function createMinimalAgent(agentDir: string, name: string, org: string, template: string): void {
+/**
+ * The standard agent file set, as filename -> content.
+ *
+ * SINGLE SOURCE OF TRUTH for what every agent must have, shared by the
+ * no-template path (createMinimalAgent) and the template path (backfill).
+ * They diverged before this existed, and the divergence ran the wrong way —
+ * see backfillMissingAgentFiles.
+ */
+function standardAgentFiles(name: string, org: string, template: string, runtime = 'claude-code'): Record<string, string> {
   const role = template === 'orchestrator' ? 'Orchestrator'
     : template === 'analyst' ? 'Analyst'
     : 'Agent';
 
-  writeFileSync(join(agentDir, 'IDENTITY.md'), `# ${name}\n\nYou are ${name}, a ${role} for ${org}.\n`);
-  writeFileSync(join(agentDir, 'SOUL.md'), `# Soul\n\nYou are helpful, precise, and proactive.\n`);
-  writeFileSync(join(agentDir, 'GOALS.md'), `# Goals\n\n- Awaiting goal configuration\n`);
-  writeFileSync(join(agentDir, 'HEARTBEAT.md'), `# Heartbeat Checklist\n\n- [ ] Check inbox\n- [ ] Update heartbeat\n`);
-  writeFileSync(join(agentDir, 'MEMORY.md'), `# Long-Term Memory\n\nNothing recorded yet.\n`);
-  writeFileSync(join(agentDir, 'USER.md'), `# User Profile\n\nNot configured yet.\n`);
-  writeFileSync(join(agentDir, 'SYSTEM.md'), `# System Context\n\nOrganization: ${org}\n`);
-  writeFileSync(join(agentDir, 'TOOLS.md'), `# Available Tools\n\nUse \`cortextos bus <command>\` for bus operations.\n`);
-  // CLAUDE.md is a thin wrapper that imports AGENTS.md (works with Claude Code's @ import syntax)
-  writeFileSync(join(agentDir, 'CLAUDE.md'), '@AGENTS.md\n');
-  writeFileSync(join(agentDir, 'AGENTS.md'), createAgentsMd(name, org, template));
+  // CLAUDE.md is CLAUDE-CODE-ONLY and must not be backfilled onto other runtimes.
+  // codex-app-server reads AGENTS.md; a CLAUDE.md there is dead weight, and
+  // tests/unit/cli/add-agent-codex.test.ts:95 asserts its absence.
+  // THE FILE SET IS RUNTIME-DEPENDENT, NOT UNIVERSAL — I wrote this generator as
+  // universal on the first pass and the codex test caught it. Same shape as every
+  // container-as-label error today: I classified by the artifact's name rather
+  // than by what actually consumes it.
+  const claudeOnly = runtime === 'claude-code';
+
+  return {
+    'IDENTITY.md': `# ${name}\n\nYou are ${name}, a ${role} for ${org}.\n`,
+    'SOUL.md': `# Soul\n\nYou are helpful, precise, and proactive.\n`,
+    'GOALS.md': `# Goals\n\n- Awaiting goal configuration\n`,
+    'HEARTBEAT.md': `# Heartbeat Checklist\n\n- [ ] Check inbox\n- [ ] Update heartbeat\n`,
+    'MEMORY.md': `# Long-Term Memory\n\nNothing recorded yet.\n`,
+    'USER.md': `# User Profile\n\nNot configured yet.\n`,
+    'SYSTEM.md': `# System Context\n\nOrganization: ${org}\n`,
+    'TOOLS.md': `# Available Tools\n\nUse \`cortextos bus <command>\` for bus operations.\n`,
+    // CLAUDE.md is a thin wrapper that imports AGENTS.md (works with Claude Code's @ import syntax)
+    ...(claudeOnly ? { 'CLAUDE.md': '@AGENTS.md\n' } : {}),
+    'AGENTS.md': createAgentsMd(name, org, template),
+  };
+}
+
+function createMinimalAgent(agentDir: string, name: string, org: string, template: string, runtime = 'claude-code'): void {
+  for (const [file, content] of Object.entries(standardAgentFiles(name, org, template, runtime))) {
+    writeFileSync(join(agentDir, file), content);
+  }
+}
+
+/**
+ * Fill in any standard file the chosen template omitted. Returns what it wrote.
+ *
+ * WHY THIS EXISTS (california-tom + zerocool, 2026-07-26) — THE INVERSION:
+ * `add-agent` copied ONE resolved template dir with no base merge, and ran the
+ * full-spine generator ONLY in the `else` branch, when no template dir was found.
+ * So an agent got the complete file set precisely when its template DID NOT EXIST:
+ *
+ *   --template hermes       -> no GOALS.md, no AGENTS.md, no CLAUDE.md
+ *   --template m2c1-worker  -> 9 of 10 missing; it booted with NO IDENTITY AT ALL
+ *   --template <typo>       -> all 10, because the lookup failed
+ *
+ * ASKING FOR A REGISTERED TEMPLATE PRODUCED A LESS COMPLETE AGENT THAN ASKING FOR
+ * ONE THAT DOES NOT EXIST — having a template was strictly worse than not having
+ * one, on a documented command (both names are in NON_CODEX_TEMPLATES and both are
+ * reachable via `cortextos add-agent <name> --template <t>`).
+ *
+ * Fixed as a BACKFILL rather than by hand-authoring the missing files into the two
+ * templates that happened to be caught. Hand-authoring repairs the instances and
+ * leaves the class: the next partial template re-creates the defect silently, and
+ * nothing checks. The generator is already the source of truth for "what an agent
+ * needs" — this just stops the template path from bypassing it.
+ *
+ * NEVER OVERWRITES. A template that ships a file is authoritative for that file;
+ * this only fills genuine absences, so it is a no-op for complete templates.
+ * SYSTEM.md is additionally regenerated downstream from orgs/<org>/context.json,
+ * which is gated on that file existing and NOT on the template — so SYSTEM.md was
+ * the one member of this set already covered for every template.
+ */
+function backfillMissingAgentFiles(agentDir: string, name: string, org: string, template: string, runtime = 'claude-code'): string[] {
+  const written: string[] = [];
+  for (const [file, content] of Object.entries(standardAgentFiles(name, org, template, runtime))) {
+    if (existsSync(join(agentDir, file))) continue;
+    writeFileSync(join(agentDir, file), content);
+    written.push(file);
+  }
+  return written;
 }
 
 function createAgentsMd(name: string, org: string, template: string): string {

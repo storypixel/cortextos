@@ -890,6 +890,9 @@ export class AgentProcess {
     const onlineMessage = isHandoffRestart || !shouldPromptTelegram
       ? ''
       : ' Send a Telegram message to the user saying you are back online.';
+    if (isHandoffRestart) {
+      return `You are resuming a context handoff. Current UTC time: ${nowUtc}.${handoffBlock} Treat the handoff document as your resume context. Do not replay the cold-start bootstrap catalog unless the handoff document explicitly requires a file. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffUxOverride}`;
+    }
     return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
@@ -906,7 +909,10 @@ export class AgentProcess {
   }
 
   private shouldPromptTelegramOnlineMessage(): boolean {
-    return this.config.telegram_polling !== false && !!this.telegramApi && !!this.telegramChatId;
+    return this.config.lifecycle_notifications !== false
+      && this.config.telegram_polling !== false
+      && !!this.telegramApi
+      && !!this.telegramChatId;
   }
 
   /**
@@ -962,7 +968,7 @@ export class AgentProcess {
       const docPath = readFileSync(markerPath, 'utf-8').trim();
       unlinkSync(markerPath);
       if (!docPath || !existsSync(docPath)) return '';
-      return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
+      return ` CONTEXT HANDOFF: Read the handoff document at ${docPath} to resume your prior session state.`;
     } catch {
       return '';
     }

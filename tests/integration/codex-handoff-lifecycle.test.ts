@@ -86,7 +86,7 @@ function consumeHandoffMarker(handoffDocPath: string): string {
   const docPath = readFileSync(markerPath, 'utf-8').trim();
   unlinkSync(markerPath);
   if (!docPath || !existsSync(docPath)) return '';
-  return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
+  return ` CONTEXT HANDOFF: Read the handoff document at ${docPath} to resume your prior session state.`;
   void handoffDocPath; // referenced in the boot prompt body itself (matches consumeHandoffBlock)
 }
 

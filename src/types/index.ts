@@ -164,6 +164,7 @@ export interface AgentConfig {
    */
   crash_window?: { seconds: number; max_crashes?: number };
   model?: string;
+  reasoning_effort?: string;
   /**
    * Whether to launch Claude Code with `--dangerously-skip-permissions`.
    * Defaults to true (back-compat: agents run unattended). Set to false to keep
@@ -222,6 +223,13 @@ export interface AgentConfig {
    * poller will be skipped regardless.
    */
   telegram_polling?: boolean;
+  /**
+   * Whether session-start, continuation, and handoff lifecycle notifications
+   * are sent to this agent's Telegram chat. Defaults to true when absent.
+   * Set to false when the chat is a shared collaboration room where process
+   * status does not belong, without disabling the inbound Telegram poller.
+   */
+  lifecycle_notifications?: boolean;
 }
 
 export interface CronEntry {

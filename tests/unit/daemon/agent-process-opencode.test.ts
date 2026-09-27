@@ -152,6 +152,37 @@ describe('AgentProcess opencode runtime', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('keeps Telegram polling active while suppressing lifecycle notifications', async () => {
+    const handoffDocPath = '/tmp/opencode-handoff.md';
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      typeof path === 'string'
+      && (path.endsWith('.handoff-doc-path')
+        || path.endsWith('.restart-planned')
+        || path === handoffDocPath),
+    );
+    fsMocks.readFileSync.mockImplementation((path: string) =>
+      typeof path === 'string' && path.endsWith('.restart-planned')
+        ? 'context handoff at 92%\n'
+        : handoffDocPath,
+    );
+
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      lifecycle_notifications: false,
+    });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+
+    ap.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage } as any, '12345');
+    await ap.start();
+
+    const prompt = mockOpencodePty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).toContain('CONTEXT HANDOFF');
+    expect(prompt).not.toContain('VERY FIRST tool call MUST be a Bash call running');
+    expect(prompt).not.toContain('send a Telegram message');
+    expect(prompt).not.toContain('Send a Telegram message');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('prompts Telegram-enabled opencode agents to send back-online Telegram on fresh start', async () => {
     const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
 
